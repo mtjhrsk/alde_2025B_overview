@@ -1,0 +1,4212 @@
+---
+title: "ALDE Party Survey September 2025"
+subtitle: 
+output:
+  html_document: default
+  pdf_document: default
+always_allow_html: yes
+---
+
+
+```{r setup, echo = FALSE, error = FALSE, message = FALSE, warning = FALSE,}
+
+library(tidyverse)
+library(tidylog)
+library(readxl)
+library(RPostgres)
+library(config)
+library(scales)
+library(sf)
+library(bbplot)
+library(srvyr)
+library(magick)
+library(ggrepel)
+library(MESS)
+library(glue) 
+library(ggh4x)
+library(eurostat)
+library(countrycode)
+library(ggpp)
+library(pals)
+#library(ggbraid)
+library(gghighlight)
+library(ggflags)
+library(ggblend)
+library(ggtext)
+library(ggimage)
+library(ggview)
+library(gridExtra)
+
+
+```
+
+## env setup
+```{r}
+geo <- read_sf("Geo/CNTR_RG_10M_2020_4326.shp")
+
+party_colour_prime <- "#e7007f"
+party_colour_sec <- "#ff59b4"
+
+win_colour_prime <- "#284ba0"
+win_colour_sec <- "#5a79c7"
+
+pop_colour_prime <- "#27aae1"
+pop_colour_sec <- "#6bd3ff"
+
+################################################################
+### LAYOUT
+legend_text_small = 12
+legend_text_medium = 16
+legend_text = 18
+legend_text_large = 22
+legend_text_big = 26
+
+axis_text = 18
+axis_text_medium = 22
+axis_text_large = 28
+
+subtitle_text_small = 18
+subtitle_text <- 20
+subtitle_text_large <- 30
+
+bar_text_small = 5
+bar_text = 7
+bar_text_large <- 9
+
+
+font_face = "plain"
+
+
+notepos <- 0.5
+notesize <- 22
+notecol <- "#686868" # dark grey
+
+## COLOURS
+neutral <- "#d9dede"  # grey
+alde_b1 <- "#008fcc"  # dark blue
+alde_b2 <- "#c1f2fb"  # light blue
+alde_p1 <- "#f1417c"  # dark pink
+alde_p2 <- "#fcd3e1"  # light pink
+
+
+alde_b1_s <- "#25bdff"  # dark blue supp
+alde_b2_s <- "#71d4ff"  # light blue supp
+alde_p1_s <- "#dcc7d0"  # dark pink supp
+alde_p2_s <- "#e6d7dd"  # light pink
+
+plot.save <- function(plot, 
+                       width = 800, 
+                       height = 500, 
+                       text.factor = 1, 
+                       filename = paste0(
+                                    format(
+                                      Sys.time(), 
+                                      format = '%Y%m%d-%H%M%S'), '-Rplot.png'
+                                    )
+                                  ) {
+
+    dpi <- text.factor * 500
+    width.calc <- width / dpi
+    height.calc <- height / dpi
+
+    ggsave(filename = filename,
+                 dpi = dpi,
+                 width = width.calc,
+                 height = height.calc,
+                 units = 'in',
+                 plot = plot,
+                bg = 'white')
+}
+
+plot.save2 <- function(plot, 
+                       width = 800, 
+                       height = 500, 
+                       text.factor = 1, 
+                       filename = paste0(
+                                    format(
+                                      Sys.time(), 
+                                      format = '%Y%m%d-%H%M%S'), '-Rplot.png'
+                                    )
+                                  ) {
+
+    dpi <- text.factor * 300
+    width.calc <- width / dpi
+    height.calc <- height / dpi
+
+    ggsave(filename = filename,
+                 dpi = dpi,
+                 width = width.calc,
+                 height = height.calc,
+                 units = 'in',
+                 plot = plot,
+                bg = 'white')
+}
+
+plot.save3 <- function(plot, 
+                       width = 800, 
+                       height = 500, 
+                       text.factor = 1, 
+                       filename = paste0(
+                                    format(
+                                      Sys.time(), 
+                                      format = '%Y%m%d-%H%M%S'), '-Rplot.png'
+                                    )
+                                  ) {
+
+    dpi <- 300
+    width.calc <- width / dpi
+    height.calc <- height / dpi
+
+    ggsave(filename = filename,
+                 dpi = dpi,
+                 width = width.calc,
+                 height = height.calc,
+                 units = 'in',
+                 plot = plot,
+                bg = 'white')
+}
+
+
+plot.save4 <- function(plot, 
+                       width = 800, 
+                       height = 500, 
+                       text.factor = 1, 
+                       filename = paste0(
+                                    format(
+                                      Sys.time(), 
+                                      format = '%Y%m%d-%H%M%S'), '-Rplot.pdf'
+                                    )
+                                  ) {
+
+    dpi <- 300
+    width.calc <- width / dpi
+    height.calc <- height / dpi
+
+    ggsave(filename = filename,
+                 dpi = dpi,
+                 width = width.calc,
+                 height = height.calc,
+                 units = 'in',
+                 plot = plot,
+                bg = 'white')
+}
+
+
+```
+
+## survey data from db
+```{r}
+
+survey <- "%-ALDESURVEY2025B"
+
+key <- config::get("ALDEdb")
+
+con <- dbConnect(RPostgres::Postgres(),
+                 dbname = key$database,
+                 host = key$server,
+                 port = key$port,
+                 user = key$uid,
+                 password = key$pwd)
+
+
+# Load questions
+# questions <- tbl(con, sql(str_c("
+#   SELECT 
+#     survey_questions_asked.*, 
+#     survey_questions.question_text  -- add other fields you need
+#   FROM survey_questions_asked
+#   LEFT JOIN survey_questions 
+#     ON survey_questions_asked.question_id = survey_questions.question_id
+#   WHERE survey_id LIKE '", survey, "'"
+# ))) %>%
+#   collect()
+
+
+questions <- dbGetQuery(con,paste0("SELECT * FROM survey_questions_asked LEFT JOIN survey_questions ON survey_questions_asked.question_id = survey_questions.question_id
+  WHERE survey_id LIKE '%", survey, "%'"))
+
+responses <- tbl(con,sql(str_c("SELECT survey_responses.survey_participant_id,
+                                       survey_responses.question_id,
+                                       survey_responses.answer_code,
+                                       answer_text,
+                                       answer_analysis,
+                                       answer_open,
+                                       weight_alde AS weight,
+                                survey_participants.sex,
+                               survey_participants.yob,
+                               country_id AS country
+                                FROM survey_responses
+
+                                LEFT JOIN survey_offered_answers
+                                  ON survey_offered_answers.survey_id = survey_responses.survey_id
+                                  AND survey_offered_answers.question_id = survey_responses.question_id
+                                  AND survey_offered_answers.answer_code = survey_responses.answer_code
+
+                                LEFT JOIN survey_participants
+                                  ON survey_responses.survey_participant_id = survey_participants.survey_participant_id
+
+                                WHERE survey_responses.survey_id like '",survey, "'
+                                ORDER BY survey_participant_number"))) %>%
+  collect()
+
+
+# countries
+
+countries <- unique(responses$country)
+
+responses %>%  group_by(country) %>% summarise(sum_na = sum(is.na(weight)))
+
+responses <- responses %>% filter(weight != "NA")
+
+```
+
+
+```{r}
+
+# survey <- "%-ALDESURVEY2025A"
+# 
+# key <- config::get("ALDEdb")
+# 
+# con <- dbConnect(RPostgres::Postgres(),
+#                  dbname = key$database,
+#                  host = key$server,
+#                  port = key$port,
+#                  user = key$uid,
+#                  password = key$pwd)
+# 
+# 
+# questions_feb <- tbl(con,sql(str_c("SELECT * FROM survey_questions_asked
+#                                 LEFT JOIN survey_questions ON survey_questions_asked.question_id = survey_questions.question_id
+#                                    WHERE survey_id like '",survey, "'"))) %>% # CHANGE TO FEB24
+#   collect()
+# 
+# rel_questions <- c("politics_interest", "region", "urban", "birthyear", "gender", "edu_level", "survey_language", "vote_nat_previous", "vote_ep_2024", "vote_nat", "country_alde", "econ_personal", "vote_nat_undecided", "vote_ep_undecided","direction_country", "expect_1", "expect_2","vote_nat_certain", "income_nowadays", "soc_exist", "soc_ideal")
+# #question_id
+# responses <- tbl(con,sql(str_c("SELECT survey_responses.survey_participant_id,
+#                                        survey_participants.survey_participant_number, survey_participants.country_id, survey_participants.sex, survey_participants.yob,
+#                                        survey_responses.question_id,
+#                                        survey_responses.answer_code,
+#                                        survey_responses.answer_open,
+#                                        answer_text,
+#                                        answer_analysis,
+#                                        weight_alde AS weight,
+#                                       urbanicity
+#                                 FROM survey_responses
+#                                 LEFT JOIN survey_offered_answers
+#                                   ON survey_offered_answers.survey_id = survey_responses.survey_id
+#                                   AND survey_offered_answers.question_id = survey_responses.question_id
+#                                   AND survey_offered_answers.answer_code = survey_responses.answer_code
+#                                 LEFT JOIN survey_participants
+#                                   ON survey_responses.survey_participant_id = survey_participants.survey_participant_id
+#                                 WHERE survey_responses.survey_id like '",survey, "'
+#                                 AND (survey_offered_answers.question_id in ('", paste(rel_questions, collapse = "','"), "')
+#                                 OR survey_responses.question_id = 'birthyear'
+#                                 OR survey_responses.question_id LIKE 'vote_probability_%'
+#                                OR survey_responses.question_id LIKE 'qol_%'
+#                                 OR survey_responses.question_id LIKE 'identity_people%'
+#                                 OR survey_responses.question_id LIKE 'action_%'
+#                                OR survey_responses.question_id LIKE 'ses_%'
+#                                   OR survey_responses.question_id = 'pair_war'
+#                                   OR survey_responses.question_id = 'pair_hardwork'
+#                                   OR survey_responses.question_id = 'pair_budget_control'
+#                                 OR survey_responses.question_id LIKE 'pers_positive%'
+#                                OR survey_responses.question_id LIKE '%approval_government'
+#                                 OR survey_responses.question_id LIKE 'approval_gov%'
+#                                 OR survey_responses.question_id LIKE 'scale_persimportance%'
+#                                OR survey_responses.question_id LIKE 'scale_isschange%'
+#                           OR survey_responses.question_id LIKE 'favo_%'
+#                           OR survey_responses.question_id LIKE 'eu_priorities_%'
+#                           OR survey_responses.question_id LIKE 'redist_%'
+#                           OR survey_responses.question_id LIKE 'taxservice_%'
+#                           OR survey_responses.question_id LIKE 'libcons_%'
+#                           OR survey_responses.question_id LIKE 'euunif_%'
+#                           OR survey_responses.question_id LIKE 'similar%'
+#                                                          OR survey_responses.question_id LIKE 'attribute%')
+#                                ORDER BY survey_participant_number") )) %>%
+#   collect()
+# 
+# responses %>%  group_by(country_id) %>% summarise(sum_na = sum(is.na(weight)))
+# 
+# responses <- responses %>% filter(weight != "NA")
+# 
+# countries <- unique(responses$country_id)
+
+
+
+
+```
+
+
+
+## old data for ukr stuff
+```{r}
+
+survey <- "%-ALDESURVEY2024A"
+
+responses24 <- tbl(con, sql(str_c("
+  SELECT survey_responses.survey_participant_id,
+         survey_participants.survey_participant_number,
+         survey_participants.country_id,
+         survey_participants.sex,
+         survey_participants.yob,
+         survey_responses.question_id,
+         survey_responses.answer_code,
+         survey_responses.answer_open,
+         answer_text,
+         answer_analysis,
+         weight_alde AS weight,
+         urbanicity
+  FROM survey_responses
+  LEFT JOIN survey_offered_answers
+    ON survey_offered_answers.survey_id = survey_responses.survey_id
+    AND survey_offered_answers.question_id = survey_responses.question_id
+    AND survey_offered_answers.answer_code = survey_responses.answer_code
+  LEFT JOIN survey_participants
+    ON survey_responses.survey_participant_id = survey_participants.survey_participant_id
+  WHERE survey_responses.survey_id LIKE '", survey, "'
+    AND (
+      survey_responses.question_id = 'birthyear'
+      OR survey_responses.question_id LIKE 'vote_probability_%'
+      OR survey_responses.question_id LIKE 'qol_%'
+      OR survey_responses.question_id LIKE 'identity_people%'
+      OR survey_responses.question_id LIKE 'action_%'
+      OR survey_responses.question_id LIKE 'ses_%'
+      OR survey_responses.question_id = 'pair_war'
+      OR survey_responses.question_id = 'pair_hardwork'
+      OR survey_responses.question_id = 'pair_budget_control'
+      OR survey_responses.question_id LIKE 'pers_positive%'
+      OR survey_responses.question_id LIKE '%approval_government'
+      OR survey_responses.question_id LIKE 'approval_gov%'
+      OR survey_responses.question_id LIKE 'scale_persimportance%'
+      OR survey_responses.question_id LIKE 'scale_isschange%'
+      OR survey_responses.question_id LIKE 'favo_%'
+      OR survey_responses.question_id LIKE 'eu_priorities_%'
+      OR survey_responses.question_id LIKE 'redist_%'
+      OR survey_responses.question_id LIKE 'taxservice_%'
+      OR survey_responses.question_id LIKE 'libcons_%'
+      OR survey_responses.question_id LIKE 'euunif_%'
+      OR survey_responses.question_id LIKE 'similar%'
+      OR survey_responses.question_id LIKE 'attribute%'
+      OR survey_responses.question_id LIKE 'ukraine_%'
+    )
+  ORDER BY survey_participant_number
+  -- No outer parentheses or alias needed here
+"))) %>%
+  collect()
+
+
+
+countries24 <- unique(responses24$country_id)
+
+# Load all PARTIES 
+
+
+
+parties24 <- tbl(con,sql(str_c("SELECT parties.survey_party_id, parties.party_id, parties.party_name_short, parties.party_name_english, 
+parties.colour, parties.left_right, parties.ideology,ches_id ,
+eup.eu_party_id, eu.party_name_short AS eu_short, eu.party_colour AS eu_colour, parties.country_id  
+FROM parties 
+                              LEFT JOIN affiliation_party_euparty AS eup ON eup.party_id = parties.party_id
+                              LEFT JOIN eu_parties AS eu ON  eu.eu_party_id = eup.eu_party_id
+                             WHERE parties.country_id in ('", paste(countries24, collapse = "','"), "')"))) %>%
+  collect()
+
+
+#get politicians ids and their party affiliation; if the date_end is null, then they are still with that party
+politicians <- dbGetQuery(con,"SELECT politicians.politician_id, politicians.politician_name, politicians.nationality, affiliation_politician_party.party_id, affiliation_politician_party.date_begin, affiliation_politician_party.date_end, affiliation_politician_party.leader 
+FROM politicians LEFT JOIN affiliation_politician_party on 
+                          politicians.politician_id = affiliation_politician_party.politician_id
+                          WHERE date_end is null ")
+
+# set up EU parties 
+
+parties_eu24 <- parties24%>%
+  distinct()%>%
+  mutate(
+    alde_members = ifelse(eu_party_id == 'alde', "EU-ALDE", "EU-Other"),
+    alde_members = ifelse (party_id == 'RO-USRPLUS', "EU-ALDE", alde_members),
+     alde_members = ifelse (party_id == 'RO-USR+PMP+FD', "EU-ALDE", alde_members),
+    alde_members = ifelse (party_id == 'LV-LA-PAR', "EU-ALDE", alde_members),
+    alde_members = ifelse (is.na(alde_members), "EU-Other", alde_members),
+    eu_parties = toupper(eu_party_id)
+  ) %>% 
+  mutate(
+    eu_short = ifelse(party_id == 'LV-LA-PAR', "ALDE", eu_short),
+     eu_short = ifelse(party_id == 'RO-USR+PMP+FD', "ALDE", eu_short),
+     ) %>% 
+  mutate(
+        eu_parties = ifelse(party_id == 'LV-LA-PAR', "ALDE", eu_parties),
+     eu_parties = ifelse(party_id == 'RO-USR+PMP+FD', "ALDE", eu_parties),
+  )
+
+alde_parties24 <- parties_eu24 %>%
+  filter(alde_members == "EU-ALDE")
+  
+# peer_group <- c(unique(peer_group$eu_parties))
+peer_group <- c("EPP", "EFA", "EDP", "ALDE")
+
+
+# Load models
+models_feb <-  tbl(con,sql(str_c("SELECT * FROM survey_models
+                                   WHERE survey_participant_id like '%ALDESURVEY2024A%'"))) %>% 
+  collect() 
+
+models_feb$country_id <- substr(models_feb$survey_participant_id, 1, 2)
+
+models_feb <- models_feb %>% 
+  separate(model, sep = "_", remove = F,into  = c("support", "party_id"))
+
+
+alde24 <- parties_eu24 %>% 
+  filter(eu_short == "ALDE") %>% 
+  select(party_id)
+
+
+models_feb <- models_feb %>% 
+  filter(party_id %in% alde24$party_id) %>% 
+  mutate(model_party_id = party_id,
+         model_value = value) %>% 
+   select(survey_participant_id, model_value, country_id, model_party_id  )
+
+dat24 <- responses24 %>% 
+  left_join(models_feb)
+
+
+```
+
+
+
+## adding country weights
+```{r}
+
+country <- unique(responses$country)
+
+countrynames <- countrycode(country,  origin = 'iso2c', destination = 'country.name')
+
+demo <- get_eurostat(id = "demo_pjan", type = "label") %>% 
+  mutate(geo = recode(geo, "Germany including former GDR" ="Germany" ))
+
+
+demodat <- demo %>% 
+  filter(age == "Total") %>%
+  filter(sex == "Total") %>% 
+  filter(TIME_PERIOD == "2024-01-01") %>% 
+  filter(geo %in% countrynames) %>% 
+  unique()
+
+weights <- demodat %>% 
+  group_by(geo) %>%
+  summarise(n = sum(values)) %>%
+  mutate(cweight = 100*(n / sum(n))) %>% 
+  select(-n)
+
+weights$country_long <- countrycode(weights$geo,  origin = 'country.name', destination = 'iso2c')
+
+responses <- responses %>% left_join(weights, by = c("country" = "country_long"))
+
+```
+
+
+## parties data from db
+```{r}
+# Load all PARTIES 
+
+# parties <- tbl(con,sql(str_c("SELECT parties.survey_party_id, parties.party_id, parties.party_name_short, parties.party_name_english, 
+# parties.colour, parties.left_right, parties.ideology,ches_id ,
+# eup.eu_party_id, eu.party_name_short AS eu_short, eu.party_colour AS eu_colour, parties.country_id  
+# FROM parties 
+#                               LEFT JOIN affiliation_party_euparty AS eup ON eup.party_id = parties.party_id
+#                               LEFT JOIN eu_parties AS eu ON  eu.eu_party_id = eup.eu_party_id
+#                              WHERE parties.country_id in ('", paste(countries, collapse = "','"), "')"))) %>%
+#   collect()
+
+parties <- tbl(con, sql(str_c("
+  SELECT 
+    parties.survey_party_id, 
+    parties.party_id, 
+    parties.party_name_short, 
+    parties.party_name_english, 
+    parties.colour, 
+    parties.left_right, 
+    parties.ideology,
+    ches_id,
+    eup.eu_party_id, 
+    eu.party_name_short AS eu_short, 
+    eu.party_colour AS eu_colour, 
+    parties.country_id  
+  FROM parties 
+  LEFT JOIN affiliation_party_euparty AS eup 
+    ON eup.party_id = parties.party_id 
+    AND eup.date_end IS NULL
+  LEFT JOIN eu_parties AS eu 
+    ON eu.eu_party_id = eup.eu_party_id
+  WHERE parties.country_id IN ('", paste(countries, collapse = "','"), "')
+"))) %>%
+  collect()
+
+#get politicians ids and their party affiliation; if the date_end is null, then they are still with that party
+politicians <- dbGetQuery(con,"SELECT politicians.politician_id, politicians.politician_name, politicians.nationality, affiliation_politician_party.party_id, affiliation_politician_party.date_begin, affiliation_politician_party.date_end, affiliation_politician_party.leader 
+FROM politicians LEFT JOIN affiliation_politician_party on 
+                          politicians.politician_id = affiliation_politician_party.politician_id
+                          WHERE date_end is null ")
+
+# set up EU parties 
+
+parties_eu <- parties%>%
+  distinct()%>%
+  mutate(
+    alde_members = ifelse(eu_party_id == 'alde', "EU-ALDE", "EU-Other"),
+    alde_members = ifelse (party_id == 'RO-USRPLUS', "EU-ALDE", alde_members),
+     alde_members = ifelse (party_id == 'RO-USR+PMP+FD', "EU-ALDE", alde_members),
+    alde_members = ifelse (party_id == 'LV-LA-PAR', "EU-ALDE", alde_members),
+    alde_members = ifelse (is.na(alde_members), "EU-Other", alde_members),
+    eu_parties = toupper(eu_party_id)
+  ) %>% 
+  mutate(
+    eu_short = ifelse(party_id == 'LV-LA-PAR', "ALDE", eu_short),
+     eu_short = ifelse(party_id == 'RO-USR+PMP+FD', "ALDE", eu_short),
+     ) %>% 
+  mutate(
+        eu_parties = ifelse(party_id == 'LV-LA-PAR', "ALDE", eu_parties),
+     eu_parties = ifelse(party_id == 'RO-USR+PMP+FD', "ALDE", eu_parties),
+  )
+
+alde_parties <- parties_eu %>%
+  filter(alde_members == "EU-ALDE")
+  
+# peer_group <- c(unique(peer_group$eu_parties))
+peer_group <- c("EPP", "EFA", "EDP", "ALDE")
+  
+
+
+```
+
+
+
+## pseudo model
+```{r}
+
+responses_init <- responses
+
+
+# nat_vote undecided - choice after undecided
+data_undecided <- responses_init %>%
+ filter(str_starts(question_id, "vote_nat_") & str_ends(question_id,"_undecided")) %>%
+  filter(!(answer_analysis %in% c("prefer_na","will_not_vote","undecided", "dont_know","other","no_answer"))) %>%
+  select(survey_participant_id, answer_undecided = answer_analysis)%>%
+  distinct()
+
+# who they voted for in EP 19
+data_vote_ep_2019 <- responses_init %>%
+  filter(question_id == "vote_ep_2024") %>%
+  filter(!(answer_analysis %in% c("prefer_na","will_not_vote","undecided", "dont_know","other","no_answer","didnt_vote"))) %>%
+  select(survey_participant_id, vote_ep_2024 = answer_analysis)%>%
+  distinct()
+
+# filter those who have 7+ vote probability for our parties
+data_vote_probability_ALDE <- responses_init %>% 
+  filter(str_detect(question_id,"vote_probability_")) %>% 
+  mutate(
+   party_id = gsub("vote_probability_", "", question_id)
+  )%>%
+  filter(party_id %in% alde_parties$survey_party_id)%>%
+  filter(answer_code>6 & answer_code != 9999) %>%
+  mutate (vote_probability_ALDE = as.logical(TRUE), rating = answer_code)%>%
+  # mutate (vote_probability_ALDE = "ALDE Supporter")%>%
+  select(survey_participant_id, vote_probability_ALDE, rating)%>%
+  distinct(survey_participant_id, .keep_all = TRUE)
+
+# filter those with 3+ vote probability of our parties
+data_ALDE_nothating <- responses_init %>% 
+  filter(str_detect(question_id,"vote_probability_")) %>% 
+  mutate(
+   party_id = gsub("vote_probability_", "", question_id)
+  )%>%
+  filter(party_id %in% alde_parties$survey_party_id)%>%
+  filter(answer_code>2 & answer_code != 9999) %>%
+  mutate (vote_probability_ALDE = as.logical(TRUE), rating = answer_code)%>%
+  # mutate (vote_probability_ALDE = "ALDE Supporter")%>%
+  select(survey_participant_id, vote_probability_ALDE, rating)
+
+# base previous vote on those who dont hate OUR party very much 
+data_vote_nat_previous <- responses_init %>%
+  filter(question_id == "vote_nat_previous") %>%
+  filter(!(answer_analysis %in% c("prefer_na","will_not_vote","undecided", "dont_know","didnt_vote","other"))) %>%
+  select(survey_participant_id, vote_nat_previous = answer_analysis)%>%
+  distinct() %>% 
+  filter(survey_participant_id %in%  data_ALDE_nothating$survey_participant_id)
+
+
+data_uncertain <- responses_init %>% 
+  filter(question_id == "vote_nat_certain" & (answer_analysis %in% c("little_certain", "not_certain", "dont_know"))) %>% 
+  left_join(data_vote_probability_ALDE, by = "survey_participant_id") %>% 
+  filter(vote_probability_ALDE != "NA")
+
+
+#check duplicates because of multiple parties in some countries
+sum(duplicated(data_uncertain$survey_participant_id))
+
+# remove duplicates
+data_uncertain <- data_uncertain %>%
+  distinct(survey_participant_id, .keep_all = TRUE)
+
+
+data_party <- responses_init %>%
+  filter(!str_ends(question_id,"_certain") & !str_ends(question_id,"_second") & !str_ends(question_id,"_previous")) %>%
+  filter(question_id == "vote_nat") %>%
+  left_join(data_undecided, by = "survey_participant_id") %>%
+  left_join(data_vote_nat_previous, by = "survey_participant_id") %>%
+  left_join(data_vote_ep_2019, by = "survey_participant_id") %>%
+  left_join(data_vote_probability_ALDE, by = "survey_participant_id") %>% 
+  distinct()%>%
+  mutate(answer_analysis = ifelse(!is.na(answer_undecided), answer_undecided, answer_analysis)) %>%
+  mutate(
+    party_support = ifelse(vote_nat_previous == 'HU-M' & vote_ep_2024 == 'HU-M' & answer_analysis == "HU-OPPOSITION","Supporter",NA),
+    party_support = ifelse( (vote_nat_previous == 'SK-PS+SPOLU' | vote_ep_2024 == 'SK-PS+SPOLU' ) & answer_analysis == "SK-PS","Supporter",NA)
+  )%>%
+  select(survey_participant_id, party_support, nat_vote = answer_analysis, vote_nat_previous, answer_undecided, vote_probability_ALDE, rating) %>%
+  mutate(party_support = ifelse(nat_vote %in% alde_parties$party_id, "Supporter", ifelse( is.na(party_support) & !(nat_vote %in% alde_parties$party_id),"Nonsupporter", party_support)))
+
+data_party2 <- responses_init %>%
+  filter(!str_ends(question_id,"_certain") & !str_ends(question_id,"_second") & !str_ends(question_id,"_previous")) %>%
+  filter(question_id == "vote_nat") %>%
+  left_join(data_undecided, by = "survey_participant_id") %>%
+  left_join(data_vote_nat_previous, by = "survey_participant_id") %>%
+  left_join(data_vote_ep_2019, by = "survey_participant_id") %>%
+  left_join(data_uncertain, by = "survey_participant_id") %>%
+  distinct()%>%
+  mutate(answer_analysis.x = ifelse(!is.na(answer_undecided), answer_undecided, answer_analysis.x)) %>%
+  mutate(party_support = ifelse(vote_nat_previous == 'HU-M' & vote_ep_2024 == 'HU-M' & answer_analysis.x == "HU-OPPOSITION","Supporter",NA),
+         party_support = ifelse( (vote_nat_previous == 'SK-PS+SPOLU' | vote_ep_2024 == 'SK-PS+SPOLU' ) & answer_analysis.x == "SK-PS","Supporter",NA))%>%
+  mutate(party_support = ifelse(vote_nat_previous == 'HU-OPPOSITION' & answer_analysis.x == "HU-M","Supporter",NA),
+         party_support = ifelse( (vote_nat_previous == 'SK-PS+SPOLU' | vote_ep_2024 == 'SK-PS+SPOLU' ) & answer_analysis.x == "SK-PS","Supporter",NA),
+         certain = answer_analysis.y) %>% 
+  select(survey_participant_id, nat_vote = answer_analysis.x, party_support,vote_nat_previous,vote_probability_ALDE,rating,  certain) %>%
+  mutate(party_support = ifelse(nat_vote %in% alde_parties$party_id | ( vote_probability_ALDE == "TRUE" & vote_nat_previous %in% alde_parties$party_id), "Supporter", "Nonsupporter"))
+
+
+data_party2$party_support <- data_party2$party_support %>% replace_na("Nonsupporter")
+
+data_party2 <- data_party2 %>%
+  mutate(supporter_uncertain = party_support) %>% 
+  select(survey_participant_id, supporter_uncertain, vote_nat_previous, rating,certain)
+
+dat <- responses_init %>%
+  left_join(data_party, by = "survey_participant_id")%>%
+  left_join(data_party2, by = "survey_participant_id")%>%
+  distinct()
+
+dat <- dat %>% 
+  mutate(party_support = ifelse(!is.na(certain) & vote_probability_ALDE == "TRUE", supporter_uncertain, party_support  ))
+
+### MANUAL ADD PL SUPPORTERS
+
+pl <- data_vote_probability_ALDE %>% 
+  filter(str_starts(survey_participant_id, "PL-")) %>% 
+  filter(rating >=8) %>% 
+  mutate( party_support = "Supporter")
+
+pldat <- dat %>% 
+  filter(country == "PL") %>% 
+  select(survey_participant_id, nat_vote) %>% 
+  unique() %>% 
+  left_join(pl)
+
+# 
+# pl <- data_vote_probability_ALDE %>% 
+#   filter(str_starts(survey_participant_id, "PL-")) %>% 
+#   filter(rating >=7) %>% 
+#   mutate( party_support = "Supporter")
+# 
+# pldat <- dat %>% 
+#   filter(country == "PL") %>% 
+#   select(survey_participant_id, nat_vote) %>% 
+#   unique() %>% 
+#   left_join(pl)
+
+
+# dat <- dat %>% 
+#   mutate(party_support = ifelse(survey_participant_id == pl$survey_participant_id, pl$party_support, party_support))
+
+dat <- dat %>%
+  left_join(pl %>% select(survey_participant_id, party_support), by = "survey_participant_id", suffix = c("", "_pl")) %>%
+  mutate(party_support = coalesce(party_support_pl, party_support)) %>%
+  select(-party_support_pl)
+
+test <- dat %>% 
+  filter(country == "DE") %>% 
+  select(survey_participant_id, party_support,supporter_uncertain, nat_vote, vote_nat_previous.x, vote_probability_ALDE, rating.x, rating.y, certain) %>% 
+  distinct()
+
+
+
+# get winnables
+
+# Load models
+models_may <-  tbl(con,sql(str_c("SELECT * FROM survey_models
+                                   WHERE survey_participant_id like '%ALDESURVEY2025A%'"))) %>% 
+  collect() 
+
+models_may$country_id <- substr(models_may$survey_participant_id, 1, 2)
+
+models_may <- models_may %>% 
+  separate(model, sep = "_", remove = F,into  = c("support", "party_id"))
+
+
+alde <- parties_eu %>% 
+  filter(eu_short == "ALDE") %>% 
+  select(party_id)
+
+
+models_may <- models_may %>% 
+  filter(party_id %in% alde$party_id) %>% 
+  mutate(model_party_id = party_id,
+         model_value = value) %>% 
+   select(survey_participant_id, model_value, country_id, model_party_id  )
+
+# 
+# models_feb <- models_feb %>% 
+#   mutate(mod_winnable = value) %>% 
+#   select(survey_participant_id, mod_winnable, country_id  )
+
+winnabledat <- models_may %>% 
+  filter(model_value == "Winnable")
+
+#sum(duplicated(winnabledat$survey_participant_id))
+
+
+#win_countries <- c("AT", "BG", "CZ","ES","EE","DE","HU","IE", "PL","PT","RO","SK","SL")
+
+# %>%
+#   filter(model == str_c("support_", party)) %>%
+#   mutate(model = ifelse(model == str_c("support_", party), "party_support", model)) %>%
+#   spread(model,value)
+
+moddat <- dat %>%
+   left_join(winnabledat)
+
+
+srv <- moddat %>% select(survey_participant_id, party_support,model_value, weight, country_id) %>% unique()
+
+srv <- srv %>% as_survey_design(ids = 1, weights = weight)
+
+srv %>%
+  group_by(country_id, model_value) %>%
+  summarize(proportion = survey_mean(),
+            total = survey_total(),
+            n_unw = unweighted(n()))
+
+
+```
+
+
+
+## MAP
+```{r dpi = 200, fig.height = 6, fig.width = 12}
+ 
+geo <- read_sf("Geo/CNTR_RG_10M_2020_4326.shp")
+
+ # geo_new <- geo %>% 
+ #   filter(!CNTR_ID %in% c("GL", "FO")) %>%
+ #  mutate(focus = ifelse(CNTR_ID %in% c("DE", "EE", "ES", "FI", "FR", "GB", "HU", "IE", "LT", "PL", "PT", "RO", "SK"),
+ #                        "included","other"),
+ #              fill = ifelse(CNTR_ID %in% c("DE", "EE", "ES", "FI", "FR", "GB", "HU", "IE", "LT", "PL", "PT", "RO", "SK"),
+ #                        "white","#E1E1E1")) 
+
+
+#countries02 <- c("CZ", "DE", "DK", "ES", "HU", "IE", "IT", "PL", "PT", "RO", "SE", "SI", "SK", "NO")
+
+#countries <- unique(dat$country)
+
+geo <- geo %>% 
+  mutate(CNTR_ID = ifelse(CNTR_ID == "EL", "GR", CNTR_ID) )
+
+combicountries <- countries
+
+combicountries <- c("ES", "BE", "DE", "SI", "BG","SK", "PT", "DK", "FR", "FI", "SE", "AT", "HU", "LT", "IT", "DE", "CH", "PL", "NL", "NO", "LV" )
+
+ geo_new <- geo %>% 
+   filter(!CNTR_ID %in% c("GL", "FO")) %>%
+  mutate(focus = ifelse(CNTR_ID %in% c(combicountries),
+                        "included","other"),
+              fill = ifelse(CNTR_ID %in% c(combicountries),
+                        "white","#E1E1E1")) 
+ 
+
+geo_crop <- st_crop(geo_new, xmin = -12, xmax = 32,
+                                    ymin = 32, ymax = 70)
+
+
+
+fig <- image_graph(width = 700, height = 1100, res = 96)
+plot <- ggplot(geo_crop) + 
+  geom_sf(aes(fill = focus), col = "white") +
+  scale_fill_manual(values = c("#ec008c","#284ba0","grey")) +
+ theme_void()+
+  theme(legend.position = "none",
+        axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks = element_blank())
+dev.off()
+
+#image_crop(fig, "10x15+50")
+
+plot.save(plot, width = 900, height = 700, text.factor = 0.2)
+
+
+
+
+```
+
+
+## COUNTRY COUNTS
+```{r}
+
+dat$weight[is.na(dat$weight)] = 1
+
+srv <- dat %>% select(survey_participant_id, party_support, weight, country) %>% unique()
+
+srv <- srv %>% as_survey_design(ids = 1, weights = weight)
+
+srv %>%
+  group_by(country, party_support) %>%
+  summarize(proportion = survey_mean(),
+            total = survey_total(),
+            n_unw = unweighted(n()))
+
+```
+
+
+## congress stuff 1
+```{r}
+
+df_all <- dat %>%
+  filter(str_detect(question_id,"congress1_1")) 
+
+plot_data <- df_all %>%
+  filter(!is.na(answer_code) & !is.na(party_support) & !is.na(country) & !is.na(weight))
+
+
+survey_design <- plot_data %>%
+  as_survey_design(weights = weight)
+
+# Calculate survey-weighted means for each group
+means_data <- survey_design %>%
+  group_by(country, party_support) %>%
+  summarise(
+    mean_score = survey_mean(answer_code, na.rm = TRUE),
+    n = unweighted(n()),
+    .groups = 'drop'
+  )
+
+
+# Create raincloud plot with flipped coordinates
+(plot <- ggplot(plot_data, aes(y = party_support, x = answer_code, fill = party_support)) +
+  # Half violin plot (cloud) 
+  stat_halfeye(
+    adjust = 1,
+    width = 0.6,
+    justification = -0.15,
+    .width = 0,
+    point_colour = NA,
+    alpha = 0.6
+  ) +
+  
+  # Boxplot 
+  # geom_boxplot(
+  #   width = 0.15,
+  #   outlier.shape = NA,
+  #   alpha = 0.5
+  # ) +
+  
+  # Raw data points (rain) with reduced size
+  # geom_point(
+  #   aes(color = party_support),
+  #   alpha = 0.25,
+  #   size = 0.8,
+  #   position = position_jitter(seed = 123, width = 0, height = 0.08)
+  # ) +
+  
+  # Survey-weighted mean points 
+  geom_point(
+    data = means_data, 
+    aes(y = party_support, x = mean_score, color = party_support),
+    size = 3, 
+   # shape = 18,
+    inherit.aes = FALSE
+  ) +
+  
+  geom_errorbar(
+    data = means_data, 
+    aes(y = party_support, x = mean_score, 
+        xmin = mean_score - mean_score_se, 
+        xmax = mean_score + mean_score_se,
+        color = party_support),
+    width = 0.15, 
+    linewidth = 1,
+    inherit.aes = FALSE
+  ) +
+  
+  # Add text labels for mean values
+  geom_text(
+    data = means_data,
+    aes(y = party_support, x = mean_score, 
+        label = sprintf("%.1f", mean_score),
+        color = party_support),
+    size = 4,
+    vjust = -1,
+    fontface = "bold",
+    inherit.aes = FALSE
+  ) +
+  
+  # Facet by country
+  facet_wrap(~ country, ncol = 5) +
+  
+  # Themes and labels
+  labs(
+    title = "(Non)Importance of the EU becoming a global superpower",
+    subtitle = "10=important",
+    x = "",
+    y = ""
+  ) +
+  
+  scale_fill_manual(values = c("Nonsupporter" = "#E74C3C", "Supporter" = "#3498DB")) +
+  scale_color_manual(values = c("Nonsupporter" = "#E74C3C", "Supporter" = "#3498DB")) +
+  
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(face = "bold", size = 15),
+    plot.subtitle = element_text(size = 13),
+    strip.text = element_text(face = "bold", size = 13),
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.spacing = unit(1, "lines"),
+    axis.text.x = element_blank(),  # Remove X-axis numbers
+    axis.ticks.x = element_blank(),  # Remove X-axis ticks
+    axis.text.y = element_text(size = 12, face = "bold") 
+  ) )
+
+
+```
+
+```{r}
+library(srvyr)
+library(dplyr)
+library(ggplot2)
+library(ggdist)
+library(stringr)
+library(emojifont)
+library(ggtext)
+
+# Filter relevant question
+df_all <- dat %>%
+  filter(str_detect(question_id, "congress1_1"))
+
+plot_data <- df_all %>%
+  filter(!is.na(answer_code), !is.na(party_support), !is.na(country), !is.na(weight))
+
+# Define survey design
+survey_design <- plot_data %>%
+  as_survey_design(weights = weight)
+
+# ---- Compute weighted means ----
+# 1. Overall population mean per country
+pop_means <- survey_design %>%
+  group_by(country) %>%
+  summarise(
+    mean_score = survey_mean(answer_code, na.rm = TRUE),
+    n = unweighted(n())
+  ) %>%
+  mutate(group = "Population")
+
+# 2. Supporters-only mean per country
+supp_means <- survey_design %>%
+  filter(party_support == "Supporter") %>%
+  group_by(country) %>%
+  summarise(
+    mean_score = survey_mean(answer_code, na.rm = TRUE),
+    n = unweighted(n())
+  ) %>%
+  mutate(group = "Supporters")
+
+# Combine means
+means_data <- bind_rows(pop_means, supp_means)
+
+# ---- Prepare data for distributions ----
+# For population (all respondents)
+dist_population <- plot_data %>%
+  mutate(group = "Population") %>%
+  select(country, group, answer_code)
+
+# For supporters only
+dist_supporters <- plot_data %>%
+  filter(party_support == "Supporter") %>%
+  mutate(group = "Supporters") %>%
+  select(country, group, answer_code)
+
+# Combine distributions
+dist_data <- bind_rows(dist_population, dist_supporters)
+
+
+
+# ---- Plot ----
+(plot <- ggplot(dist_data, aes(y = group, x = answer_code, fill = group)) +
+  # Rainclouds
+  stat_halfeye(
+    adjust = 1,
+    width = 0.6,
+    justification = -0.15,
+    .width = 0,
+    point_colour = NA,
+    alpha = 0.6
+  ) +
+  # Weighted means
+  geom_point(
+    data = means_data,
+    aes(y = group, x = mean_score, color = group),
+    size = 3,
+    inherit.aes = FALSE
+  ) +
+  geom_errorbar(
+    data = means_data,
+    aes(y = group,
+        xmin = mean_score - mean_score_se,
+        xmax = mean_score + mean_score_se,
+        color = group),
+    width = 0.15,
+    linewidth = 1,
+    inherit.aes = FALSE
+  ) +
+  geom_text(
+    data = means_data,
+    aes(y = group, x = mean_score, label = sprintf("%.1f", mean_score), color = group),
+    size = 4,
+    vjust = -1,
+    fontface = "bold",
+    inherit.aes = FALSE
+  ) +
+  facet_wrap(~ country, ncol = 5) +
+  labs(
+  title = "",
+    subtitle = "10 = important",
+    x = "",
+    y = ""
+  ) +
+  scale_fill_manual(values = c("Population" = "black", "Supporters" = "#3498DB")) +
+  scale_color_manual(values = c("Population" = "black", "Supporters" = "#3498DB")) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(face = "bold", size = 15),
+    plot.subtitle = element_text(size = 13),
+    strip.text = element_text(face = "bold", size = 13),
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.spacing = unit(1, "lines"),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.text.y = element_text(size = 12, face = "bold")
+ #plot.title = element_text(family = "emoji", size = 15, face = "bold")
+  ) )
+
+
+```
+
+## congress stuff 2
+```{r}
+
+cats <- data.frame(
+  cat_id = c("congress2_1", 
+             "congress2_2", 
+             "congress2_3", 
+             "congress2_4", 
+             "congress2_5",
+             "congress2_6",
+             "congress2_7",
+             "congress2_8",
+             "congress2_9"),
+  cats = c("Military and defence capability",
+           "Leadership in diplomacy ",
+           "Leadership on climate",
+           "Economic power on par \nwith the US and China",
+           "Defending liberal values",
+           "Technological independence",
+           "Setting global standards",
+           "Stronger, directly elected institutions",
+           "No superpower"
+           ))
+
+
+questions <- questions %>% 
+  janitor::clean_names() 
+
+qs <- questions %>% 
+  filter(str_detect(question_id,"^congress2_")) %>% 
+  select(question_id, question_text2) %>% 
+  unique()
+
+df_all <- dat %>%
+  filter(str_detect(question_id,"^congress2_")) %>% 
+ filter(!str_detect(question_id, "(_dontknow|_none)$")) %>%     
+  group_by(geo,question_id, answer_code) %>%
+    summarise(share = sum(weight, na.rm = T)) %>%
+    group_by(geo, question_id) %>%
+    mutate(share = share/sum(share, na.rm = T),
+           share = round_percent(share, decimals = 0L, ties = "last")) %>% 
+  filter(answer_code == 1) %>% 
+  left_join(cats, by=c("question_id" = "cat_id"))
+
+
+df_sup <- dat %>%
+  filter(party_support == "Supporter") %>% 
+    filter(str_detect(question_id,"^congress2_")) %>%
+ filter(!str_detect(question_id, "(_dontknow|_none)$")) %>%     
+  group_by(geo,question_id, answer_code) %>%
+    summarise(share = sum(weight, na.rm = T)) %>%
+    group_by(geo, question_id) %>%
+    mutate(share = share/sum(share, na.rm = T),
+           share = round_percent(share, decimals = 0L, ties = "last")) %>% 
+  filter(answer_code == 1) %>% 
+  left_join(cats, by=c("question_id" = "cat_id"))
+
+
+geo_avg  <- df_sup %>%  
+  left_join(weights) %>% 
+  group_by(question_id) %>% 
+ summarise(share = round(weighted.mean(share, cweight))) %>% 
+  mutate(geo = ".AVERAGE") %>% 
+  mutate(question_id=fct_reorder(question_id,share)) %>% 
+  left_join(cats, by=c("question_id" = "cat_id"))
+
+order <- geo_avg %>% 
+  arrange(-share) %>% 
+  mutate(index = row_number()) 
+
+geo_dat <- df_sup %>% 
+  ungroup() %>% 
+  dplyr::select(geo, question_id, share, cats)%>% 
+  rbind(geo_avg) 
+
+order <- order %>%  select(-geo, -share)
+
+geo_dat <- geo_dat %>%  left_join(order)
+
+geo_dat$country_id <- tolower(countrycode(geo_dat$geo,  origin = 'country.name', destination = 'iso2c'))
+
+highest <- geo_avg %>% slice(which.max(share))
+
+geo_dat <- geo_dat %>% 
+  mutate(country_id = ifelse(question_id == highest$question_id,country_id, "NA" ) )
+
+#extr_dat <- extr_dat %>% filter(geo != "AVERAGE")
+
+geo_dat$flag <- toupper(geo_dat$country_id)
+
+geo_dat$geo2 <- countrycode(geo_dat$geo,  origin = 'country.name', destination = 'iso2c')
+
+geo_dat <- geo_dat %>% 
+  mutate(geo2 = ifelse(is.na(geo2), ".AVERAGE", geo2))
+
+
+(plot <- ggplot(geo_dat, aes( y = fct_reorder(cats, -index), x = geo2)) +
+  geom_tile(aes(fill = share),colour = "white", show.legend =c(fill=FALSE), width = .975, height = .95) + 
+  geom_text(aes(label = share), size = 8, colour = "white") +theme_minimal() +
+  bbc_style()+
+  theme(
+    plot.subtitle = element_text(family = "presfont",hjust = 0.5, size = 25),
+   # axis.text.x = element_text(family = "presfont", size = 20),
+  #  axis.text.y = element_text(family = "presfont",,size = 20),
+    legend.text = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_blank(),
+    plot.caption = element_text(family = "presfont", size = 18, hjust = notepos, color = notecol), 
+    plot.margin = margin(t = 2, r = 0.2, b = 0.2, l = 0.2, "cm"),
+  axis.text.y = element_text(family = "presfont", size = 20,
+                                   margin = margin(t = 0, r = 10, b = 0, l = 0)),
+        axis.text.x = element_text(family = "presfont", size = 20,
+                                   margin = margin(t = 2, r = 0, b = 0, l = 0), face = "bold"))+
+  scale_x_discrete(position = "top", expand = expansion(mult = c(0, 0)) ) + 
+  binned_scale("fill",
+                 "foo",
+                 ggplot2:::pal_binned(scales::manual_pal(c("#fec44f","#fe9929","#ec7014","#cc4c02","#993404","#662506"))),
+                 guide="coloursteps",
+                 breaks=seq(0,60,by=9.9),
+  #               limits=c(0,0.04),
+                 show.limits=TRUE)+  labs(caption= str_wrap("Q:'When you hear the phrase “the European Union should become a global superpower,” what do you think this should mean in practice?'. % selecting the option. Supporters, September 2025", width = 100))+
+  ggflags::geom_flag(data = . %>% filter(country_id != "NA"), aes(country = country_id, x = geo2), y = 11.2, size =5) ) 
+
+plot.save(plot, width = 2500, height = 1700, text.factor = 1)
+
+
+library(ggview)
+
+
+ggplot(geo_dat, aes(y = fct_reorder(cats, -index), x = geo2)) +
+  geom_tile(aes(fill = share), colour = "white", show.legend = c(fill=FALSE), width = .975, height = .95) + 
+  geom_text(aes(label = share), size = 12, colour = "white") +
+  theme_minimal() +
+  bbc_style() +
+  theme(
+    plot.subtitle = element_text(family = "presfont", hjust = 0.5, size = 25),
+    legend.text = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_blank(),
+    plot.caption = element_text(family = "presfont", size = 22, hjust = notepos, color = notecol, lineheight = 0.3), 
+    plot.margin = margin(t = 2, r = 0.2, b = 0.2, l = 0.2, "cm"),
+    # Fixed y-axis: centered alignment with no margin
+    axis.text.y = element_text(family = "presfont", size = 25,
+                               hjust = 0.5,  # Center horizontally
+                               vjust = 0.5,  # Center vertically
+                               margin = margin(t = 0, r = 0, b = 0, l = 0),
+                               lineheight = 0.3),
+    # Fixed x-axis: removed top margin
+    axis.text.x = element_text(family = "presfont", size = 25,
+                               margin = margin(t = 0, r = 0, b = 0, l = 0),  # Changed t from 2 to 0
+                               face = "bold")
+  ) +
+  scale_x_discrete(position = "top", expand = expansion(mult = c(0, 0))) + 
+  binned_scale("fill",
+               "foo",
+               ggplot2:::pal_binned(scales::manual_pal(c("#fec44f","#fe9929","#ec7014","#cc4c02","#993404","#662506"))),
+               guide = "coloursteps",
+               breaks = seq(0, 60, by = 9.9),
+               show.limits = TRUE) +  
+  labs(caption = str_wrap("Q:'When you hear the phrase 'the European Union should become a global superpower,' what do you think this should mean in practice?'. % selecting the option. Supporters, September 2025", width = 100)) +
+  ggflags::geom_flag(data = . %>% filter(country_id != "NA"), aes(country = country_id, x = geo2), y = 10.5, size = 6)+ canvas(8,5) 
+
+plot.save(plot, width = 2500, height = 1500, text.factor = 1)
+
+
+
+```
+
+
+
+## congress stuff 3
+```{r}
+
+
+questions <- questions %>% 
+  janitor::clean_names() 
+
+qs <- questions %>% 
+  filter(str_detect(question_id,"^congress3_")) %>% 
+  select(question_id, question_text2) %>% 
+  unique()
+
+
+
+cats <- data.frame(
+  cat_id = c("congress3_1", 
+             "congress3_2", 
+             "congress3_3", 
+             "congress3_4", 
+             "congress3_5",
+             "congress3_6",
+             "congress3_7",
+             "congress3_8",
+             "congress3_9",
+             "congress3_10",
+             "congress3_11"),
+  cats = c("EU army",
+           "United foreign policy",
+           "Directly elected EU leaders",
+           "Transnational lists",
+           "Investments in innovation",
+           "Energy independence",
+           "Unity among EU members",
+           "Common econ policy and budget",
+           "Common trade policy",
+           "Already a superpower",
+           "No superpower"
+           ))
+
+
+df_all <- dat %>%
+  filter(str_detect(question_id,"^congress3_")) %>% 
+ filter(!str_detect(question_id, "(_dontknow|_none)$")) %>%     
+  group_by(geo,question_id, answer_code) %>%
+    summarise(share = sum(weight, na.rm = T)) %>%
+    group_by(geo, question_id) %>%
+    mutate(share = share/sum(share, na.rm = T),
+           share = round_percent(share, decimals = 0L, ties = "last")) %>% 
+  filter(answer_code == 1) %>% 
+  left_join(cats, by=c("question_id" = "cat_id"))
+
+
+df_sup <- dat %>%
+  filter(party_support == "Supporter") %>% 
+    filter(str_detect(question_id,"^congress3_")) %>%
+ filter(!str_detect(question_id, "(_dontknow|_none)$")) %>%     
+  group_by(geo,question_id, answer_code) %>%
+    summarise(share = sum(weight, na.rm = T)) %>%
+    group_by(geo, question_id) %>%
+    mutate(share = share/sum(share, na.rm = T),
+           share = round_percent(share, decimals = 0L, ties = "last")) %>% 
+  filter(answer_code == 1) %>% 
+  left_join(cats, by=c("question_id" = "cat_id"))
+
+
+geo_avg  <- df_sup %>%  
+  left_join(weights) %>% 
+  group_by(question_id) %>% 
+ summarise(share = round(weighted.mean(share, cweight))) %>% 
+  mutate(geo = ".AVERAGE") %>% 
+  mutate(question_id=fct_reorder(question_id,share)) %>% 
+  left_join(cats, by=c("question_id" = "cat_id"))
+
+order <- geo_avg %>% 
+  arrange(-share) %>% 
+  mutate(index = row_number()) 
+
+geo_dat <- df_sup %>% 
+  ungroup() %>% 
+  dplyr::select(geo, question_id, share, cats)%>% 
+  rbind(geo_avg) 
+
+order <- order %>%  select(-geo, -share)
+
+geo_dat <- geo_dat %>%  left_join(order)
+
+geo_dat$country_id <- tolower(countrycode(geo_dat$geo,  origin = 'country.name', destination = 'iso2c'))
+
+highest <- geo_avg %>% slice(which.max(share))
+
+geo_dat <- geo_dat %>% 
+  mutate(country_id = ifelse(question_id == highest$question_id,country_id, "NA" ) )
+
+#extr_dat <- extr_dat %>% filter(geo != "AVERAGE")
+
+geo_dat$flag <- toupper(geo_dat$country_id)
+
+geo_dat$geo2 <- countrycode(geo_dat$geo,  origin = 'country.name', destination = 'iso2c')
+
+geo_dat <- geo_dat %>% 
+  mutate(geo2 = ifelse(is.na(geo2), ".AVERAGE", geo2))
+
+
+(plot <- ggplot(geo_dat, aes( y = fct_reorder(cats, -index), x = geo2)) +
+  geom_tile(aes(fill = share),colour = "white", show.legend =c(fill=FALSE), width = .975, height = .95) + 
+  geom_text(aes(label = share), size = 8, colour = "white") +theme_minimal() +
+  bbc_style()+
+  theme(
+    plot.subtitle = element_text(family = "presfont",hjust = 0.5, size = 25),
+   # axis.text.x = element_text(family = "presfont", size = 20),
+  #  axis.text.y = element_text(family = "presfont",,size = 20),
+    legend.text = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_blank(),
+    plot.caption = element_text(family = "presfont", size = 18, hjust = notepos, color = notecol), 
+    plot.margin = margin(t = 2, r = 0.2, b = 0.2, l = 0.2, "cm"),
+  axis.text.y = element_text(family = "presfont", size = 20,
+                                   margin = margin(t = 0, r = 10, b = 0, l = 0)),
+        axis.text.x = element_text(family = "presfont", size = 20,
+                                   margin = margin(t = 2, r = 0, b = 0, l = 0), face = "bold"))+
+  scale_x_discrete(position = "top", expand = expansion(mult = c(0, 0)) ) + 
+  binned_scale("fill",
+                 "foo",
+                 ggplot2:::pal_binned(scales::manual_pal(c("#fec44f","#fe9929","#ec7014","#cc4c02","#993404","#662506"))),
+                 guide="coloursteps",
+                 breaks=seq(0,60,by=9.9),
+  #               limits=c(0,0.04),
+                 show.limits=TRUE)+  labs(caption= str_wrap("Q:'In your opinion, what is currently missing for the EU to become a true global superpower?'. % selecting the option. Supporters, September 2025", width = 100))+
+  ggflags::geom_flag(data = . %>% filter(country_id != "NA"), aes(country = country_id, x = geo2), y = 11.2, size =5) ) 
+
+plot.save(plot, width = 2500, height = 1700, text.factor = 1)
+
+
+
+ggplot(geo_dat, aes(y = fct_reorder(cats, -index), x = geo2)) +
+  geom_tile(aes(fill = share), colour = "white", show.legend = c(fill=FALSE), width = .975, height = .95) + 
+  geom_text(aes(label = share), size = 12, colour = "white") +
+  theme_minimal() +
+  bbc_style() +
+  theme(
+    plot.subtitle = element_text(family = "presfont", hjust = 0.5, size = 25),
+    legend.text = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_blank(),
+    plot.caption = element_text(family = "presfont", size = 22, hjust = notepos, color = notecol, lineheight = 0.3), 
+    plot.margin = margin(t = 2, r = 0.2, b = 0.2, l = 0.2, "cm"),
+    # Fixed y-axis: centered alignment with no margin
+    axis.text.y = element_text(family = "presfont", size = 25,
+                               hjust = 0.5,  # Center horizontally
+                               vjust = 0.5,  # Center vertically
+                               margin = margin(t = 0, r = 0, b = 0, l = 0),
+                               lineheight = 0.3),
+    # Fixed x-axis: removed top margin
+    axis.text.x = element_text(family = "presfont", size = 25,
+                               margin = margin(t = 0, r = 0, b = 0, l = 0),  # Changed t from 2 to 0
+                               face = "bold")
+  ) +
+  scale_x_discrete(position = "top", expand = expansion(mult = c(0, 0))) + 
+  binned_scale("fill",
+               "foo",
+               ggplot2:::pal_binned(scales::manual_pal(c("#dadaeb","#bcbddc","#9e9ac8","#807dba","#6a51a3","#54278f", "#3f007d"))),
+               guide = "coloursteps",
+               breaks = seq(0, 60, by = 9.9),
+               show.limits = TRUE) +  
+  labs(caption = str_wrap("Q:'In your opinion, what is currently missing for the EU to become a true global superpower?'. % selecting the option. Supporters, September 2025", width = 100)) +
+  ggflags::geom_flag(data = . %>% filter(country_id != "NA"), aes(country = country_id, x = geo2), y = 12.7, size = 6)+ canvas(8,5) 
+
+plot.save(plot, width = 2500, height = 1500, text.factor = 1)
+
+
+
+```
+
+
+
+## ISSUE IMPORTANCE
+```{r}
+# 1 = extremely important
+# 5 = not important at all
+
+df_all <- dat %>%
+  filter(str_detect(question_id,"^scale_persimp")) %>%
+    filter(question_id != "scale_persimportance_prefer_na") %>% 
+  filter(answer_code != "9999") %>% 
+  group_by(geo, question_id, answer_code) %>%
+  summarise(share = sum(weight, na.rm = T)) %>%
+  mutate(share = share/sum(share, na.rm = T),
+         share = round_percent(share, decimals = 0L, ties = "last"),
+         question_id = recode(question_id,
+                             "scale_persimp_climate" = "Climate \nChange",
+                              "scale_persimp_corruption_judicial" = "Corrupt., \nJudicial \nIndepend.", 
+                              "scale_persimp_crime" = "Crime, \nPublic \nSafety",
+                              "scale_persimp_schools_education" = "Schools, \nEducation",
+                              "scale_persimp_health" = "Health \nCare",
+                              "scale_persimp_costs_inflation" = "Inflation, \nCost of \nLiving",
+                              "scale_persimp_jobs" = "Jobs",
+                              "scale_persimp_reproductive_rights" = "Abortion, \nReprod. \nRights",
+                              "scale_persimp_security" = "National \nSecurity",
+                              "scale_persimp_migration" = "Migration, \nBorder \nControl",
+                              "scale_persimp_housing" = "Housing \nAfford.",
+                              "scale_persimp_energy_security" = "Energy \nSecurity",
+                              "scale_persimp_pensions" = "Pensions",
+                              "scale_persimp_eu_relations" = "Relations \nwith \nthe EU",
+                             "scale_persimp_taxes" = "Taxes"))   %>% 
+  ungroup() 
+
+extr_all <- df_all %>% 
+  filter(answer_code == 1) %>% 
+  mutate(party_support = "Population") %>% 
+  left_join(weights)
+  
+extr_avg  <- extr_all %>%  
+  group_by(question_id) %>% 
+ summarise(share = round(weighted.mean(share, cweight))) %>% 
+  mutate(geo = ".AVERAGE") %>% 
+  mutate(question_id=fct_reorder(question_id,share)) 
+
+order <- extr_avg %>% 
+  arrange(-share) %>% 
+  mutate(index = row_number()) 
+
+extr_dat <- extr_all %>% 
+  select(geo, question_id, share)%>% 
+  rbind(extr_avg) 
+
+order <- order %>%  select(-geo, -share)
+
+extr_dat <- extr_dat %>%  left_join(order)
+
+extr_dat$country_id <- tolower(countrycode(extr_dat$geo,  origin = 'country.name', destination = 'iso2c'))
+
+#extr_dat <- extr_dat %>% filter(question_id != "scale_persimportance_taxes")
+
+highest <- extr_avg %>% slice(which.max(share))
+
+extr_dat <- extr_dat %>% 
+  mutate(country_id = ifelse( question_id == highest$question_id,country_id, "NA" ) )
+
+#extr_dat <- extr_dat %>% filter(geo != "AVERAGE")
+
+extr_dat$geo2 <- countrycode(extr_dat$geo,  origin = 'country.name', destination = 'iso2c')
+
+extr_dat <- extr_dat %>% 
+  mutate(geo2 = ifelse(is.na(geo2), "AVG", geo2))
+
+
+
+
+extr_dat <- extr_dat %>% 
+  mutate(
+    question_id = recode(question_id,
+                             "Climate \nChange" = "Climate Change",
+                              "Corrupt., \nJudicial \nIndepend." = "Corruption", 
+                              "Crime, \nPublic \nSafety" = "Crime & Public Safety",
+                              "Schools, \nEducation" = "Schools & Education",
+                              "Health \nCare" = "Healthcare",
+                              "Inflation, \nCost of \nLiving" = "Inflation & Cost of Living",
+                              "Jobs" = "Jobs",
+                              "Abortion, \nReprod. \nRights" = "Abortion & Reproductive Rights",
+                              "National \nSecurity" = "National security",
+                              "Migration, \nBorder \nControl" = "Migration & Border Control",
+                              "Housing \nAfford." = "Housing Affordability",
+                              "Energy \nSecurity" = "Energy Security",
+                              "Pensions" = "Pensions",
+                              "Relations \nwith \nthe EU" = "Relations with the EU",
+                         "Taxes" = "Taxes")) 
+    
+
+
+ggplot(extr_dat, aes( y = fct_reorder(question_id, -index), x = geo2)) +
+  geom_tile(aes(fill = share),colour = "white", show.legend =c(fill=FALSE), width = .975, height = .975) + 
+  geom_text(aes(label = share), size = 7, colour = "white") +theme_minimal() +
+  bbc_style()+
+  theme(
+    plot.subtitle = element_text(family = "presfont",hjust = 0.5, size = 20),
+   # axis.text.x = element_text(family = "presfont", size = 20),
+  #  axis.text.y = element_text(family = "presfont",,size = 20),
+    legend.text = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_blank(),
+    plot.caption = element_text(family = "presfont", size = 15, hjust = notepos, color = notecol), 
+    plot.margin = margin(t = 2, r = 0.2, b = 0.2, l = 0.2, "cm"),
+  axis.text.y = element_text(family = "presfont", size = 20,
+                                   margin = margin(t = 0, r = 10, b = 0, l = 0)),
+        axis.text.x = element_text(family = "presfont", size = 20,
+                                   margin = margin(t = -1, r = 0, b = 0, l = 0), face = "bold"))+
+  scale_x_discrete(position = "top", expand = expansion(mult = c(0, 0)) ) + 
+  binned_scale("fill",
+                 "foo",
+                 ggplot2:::pal_binned(scales::manual_pal(c("#fcc5c0", "#fa9fb5","#f768a1","#dd3497","#ae017e","#7a0177","#49006a"))),
+                 guide="coloursteps",
+                 breaks=seq(0,70,by=9.9),
+                 limits=c(0,70),
+                 show.limits=TRUE)+  labs(caption= "% considering the issue 'extremely important'. Population average, September 2025")+
+  ggflags::geom_flag(data = . %>% filter(country_id != "NA"), aes(country = country_id, x = geo2), y = 16.7, size = 9) + canvas(14,10) 
+
+
+
+```
+
+
+## ISSUE IMPORTANCE - SUPPORTERS
+```{r}
+
+# 1 = extremely important
+# 5 = not important at all
+
+df_all <- dat %>%
+  filter(str_detect(question_id,"^scale_persimp")) %>%
+    filter(question_id != "scale_persimportance_prefer_na") %>% 
+  filter(answer_code != "9999") %>% 
+      filter(party_support == "Supporter") %>%
+  group_by(geo, question_id, answer_code) %>%
+  summarise(share = sum(weight, na.rm = T)) %>%
+  mutate(share = share/sum(share, na.rm = T),
+         share = round_percent(share, decimals = 0L, ties = "last"),
+         question_id = recode(question_id,
+                             "scale_persimp_climate" = "Climate \nChange",
+                              "scale_persimp_corruption_judicial" = "Corrupt., \nJudicial \nIndepend.", 
+                              "scale_persimp_crime" = "Crime, \nPublic \nSafety",
+                              "scale_persimp_schools_education" = "Schools, \nEducation",
+                              "scale_persimp_health" = "Health \nCare",
+                              "scale_persimp_costs_inflation" = "Inflation, \nCost of \nLiving",
+                              "scale_persimp_jobs" = "Jobs",
+                              "scale_persimp_reproductive_rights" = "Abortion, \nReprod. \nRights",
+                              "scale_persimp_security" = "National \nSecurity",
+                              "scale_persimp_migration" = "Migration, \nBorder \nControl",
+                              "scale_persimp_housing" = "Housing \nAfford.",
+                              "scale_persimp_energy_security" = "Energy \nSecurity",
+                              "scale_persimp_pensions" = "Pensions",
+                              "scale_persimp_eu_relations" = "Relations \nwith \nthe EU",
+                             "scale_persimp_taxes" = "Taxes"))   %>% 
+  ungroup() 
+
+
+extr_all <- df_all %>% 
+  filter(answer_code == 1) %>% 
+  mutate(party_support = "Supporters") %>% 
+  left_join(weights)
+  
+extr_avg  <- extr_all %>%  
+  group_by(question_id) %>% 
+ summarise(share = round(weighted.mean(share, cweight))) %>% 
+  mutate(geo = ".AVERAGE") %>% 
+  mutate(question_id=fct_reorder(question_id,share)) 
+
+order <- extr_avg %>% 
+  arrange(-share) %>% 
+  mutate(index = row_number()) 
+
+extr_dat <- extr_all %>% 
+  select(geo, question_id, share)%>% 
+  rbind(extr_avg) 
+
+order <- order %>%  select(-geo, -share)
+
+extr_dat <- extr_dat %>%  left_join(order)
+
+extr_dat$country_id <- tolower(countrycode(extr_dat$geo,  origin = 'country.name', destination = 'iso2c'))
+
+#extr_dat <- extr_dat %>% filter(question_id != "scale_persimportance_taxes")
+
+highest <- extr_avg %>% slice(which.max(share))
+
+extr_dat <- extr_dat %>% 
+  mutate(country_id = ifelse( question_id == highest$question_id,country_id, "NA" ) )
+
+#extr_dat <- extr_dat %>% filter(geo != "AVERAGE")
+
+extr_dat$geo2 <- countrycode(extr_dat$geo,  origin = 'country.name', destination = 'iso2c')
+
+extr_dat <- extr_dat %>% 
+  mutate(geo2 = ifelse(is.na(geo2), "AVG", geo2))
+
+
+extr_dat <- extr_dat %>% 
+  mutate(
+    question_id = recode(question_id,
+                             "Climate \nChange" = "Climate Change",
+                              "Corrupt., \nJudicial \nIndepend." = "Corruption", 
+                              "Crime, \nPublic \nSafety" = "Crime & Public Safety",
+                              "Schools, \nEducation" = "Schools & Education",
+                              "Health \nCare" = "Healthcare",
+                              "Inflation, \nCost of \nLiving" = "Inflation & Cost of Living",
+                              "Jobs" = "Jobs",
+                              "Abortion, \nReprod. \nRights" = "Abortion & Reproductive Rights",
+                              "National \nSecurity" = "National security",
+                              "Migration, \nBorder \nControl" = "Migration & Border Control",
+                              "Housing \nAfford." = "Housing Affordability",
+                              "Energy \nSecurity" = "Energy Security",
+                              "Pensions" = "Pensions",
+                              "Relations \nwith \nthe EU" = "Relations with the EU",
+                         "Taxes" = "Taxes")) 
+    
+
+
+ggplot(extr_dat, aes( y = fct_reorder(question_id, -index), x = geo2)) +
+  geom_tile(aes(fill = share),colour = "white", show.legend =c(fill=FALSE), width = .975, height = .975) + 
+  geom_text(aes(label = share), size = 7, colour = "white") +theme_minimal() +
+  bbc_style()+
+  theme(
+    plot.subtitle = element_text(family = "presfont",hjust = 0.5, size = 20),
+   # axis.text.x = element_text(family = "presfont", size = 20),
+  #  axis.text.y = element_text(family = "presfont",,size = 20),
+    legend.text = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_blank(),
+    plot.caption = element_text(family = "presfont", size = 15, hjust = notepos, color = notecol), 
+    plot.margin = margin(t = 2, r = 0.2, b = 0.2, l = 0.2, "cm"),
+  axis.text.y = element_text(family = "presfont", size = 20,
+                                   margin = margin(t = 0, r = 10, b = 0, l = 0)),
+        axis.text.x = element_text(family = "presfont", size = 20,
+                                   margin = margin(t = -1, r = 0, b = 0, l = 0), face = "bold"))+
+  scale_x_discrete(position = "top", expand = expansion(mult = c(0, 0)) ) + 
+  binned_scale("fill",
+                 "foo",
+                 ggplot2:::pal_binned(scales::manual_pal(c("#fcc5c0", "#fa9fb5","#f768a1","#dd3497","#ae017e","#7a0177","#49006a"))),
+                 guide="coloursteps",
+                 breaks=seq(0,70,by=9.9),
+                 limits=c(0,70),
+                 show.limits=TRUE)+  labs(caption= "% considering the issue 'extremely important'. Supporter average, September 2025")+
+  ggflags::geom_flag(data = . %>% filter(country_id != "NA"), aes(country = country_id, x = geo2), y = 16.7, size = 9) + canvas(14,10) 
+
+
+
+
+
+
+```
+
+
+## GOV PERFORMANCE
+```{r}
+
+#answer_5 = got much worse
+
+df_all <- dat %>%
+    filter(str_detect(question_id,"scale_isschange")) %>%
+    filter(answer_code != "9999") %>%
+    group_by(geo, question_id, answer_analysis) %>%
+    summarise(share = sum(weight, na.rm = T)) %>%
+    mutate(share = share/sum(share, na.rm = T),
+           share = round_percent(share, decimals = 0L, ties = "last"),
+           question_id = recode(question_id,
+                                "scale_isschange_climate" = "Climate \nChange",
+                                "scale_isschange_corruption_judicial" = "Corrupt., \nJudicial \nIndepend.",
+                                "scale_isschange_crime" = "Crime, \nPublic \nSafety",
+                                "scale_isschange_schools_education" = "Schools, \nEducation",
+                                "scale_isschange_health" = "Health \nCare",
+                                "scale_isschange_costs_inflation" = "Inflation, \nCost of \nLiving",
+                                "scale_isschange_jobs" = "Jobs",
+                                "scale_isschange_reproductive_rights" = "Abortion, \nReprod. \nRights",
+                                "scale_isschange_security" = "National \nSecurity",
+                                "scale_isschange_migration" = "Migration, \nBorder \nControl",
+                                "scale_isschange_housing_affordability" = "Housing \nAfford.",
+                                "scale_isschange_energy_security" = "Energy \nSecurity",
+                                "scale_isschange_pensions" = "Pensions",
+                                "scale_isschange_eu_relations" = "Relations \nwith \nthe EU",
+                                "scale_isschange_taxes" = "Taxes")) %>%
+    group_by(geo, question_id, answer_analysis) %>%
+    summarise(share = sum(share)) %>% 
+  filter(question_id != "scale_isschange_taxes")
+
+# %>%
+#     spread(answer_analysis, share) %>%
+#     replace(is.na(.), 0) %>%
+#     gather(answer_analysis, share, -question_id) %>%
+#     mutate(answer_analysis = recode(answer_analysis,
+#                                   "got_much_worse"  = "Much\nworse",
+#                                   "got_slightly_worse" = "Slightly\nworse",
+#                                   "stayed_about_same" = "Same",
+#                                   "got_slightly_better" = "Slightly\nbetter",
+#                                   "got_much_better" = "Much\nbetter"),
+#            answer_analysis = factor(answer_analysis,
+#                                     levels = c("Much\nworse", "Slightly\nworse",
+#                                                "Same",
+#                                                "Slightly\nbetter", "Much\nbetter"),
+#                                     ordered = T)) %>%
+#     ungroup()
+
+
+extr_all <- df_all %>% 
+  filter(answer_analysis == "answer_5") %>% 
+  mutate(party_support = "Population") %>% 
+  group_by(geo, question_id) %>% 
+  summarise(share = sum(share)) %>% 
+  left_join(weights) 
+  
+  
+extr_avg  <- extr_all %>%  
+  group_by(question_id) %>% 
+ summarise(share = round(weighted.mean(share, cweight))) %>% 
+  mutate(geo = ".AVERAGE") %>% 
+  mutate(question_id=fct_reorder(question_id,share)) 
+
+order <- extr_avg %>% 
+  arrange(-share) %>% 
+  mutate(index = row_number()) 
+
+extr_dat <- extr_all %>% 
+  select(geo, question_id, share)%>% 
+  rbind(extr_avg) 
+
+order <- order %>%  select(-geo, -share)
+
+extr_dat <- extr_dat %>%  left_join(order)
+
+extr_dat$country_id <- tolower(countrycode(extr_dat$geo,  origin = 'country.name', destination = 'iso2c'))
+
+highest <- extr_avg %>% slice(which.max(share))
+
+extr_dat <- extr_dat %>% 
+  mutate(country_id = ifelse( question_id == highest$question_id,country_id, "NA" ) ) 
+
+
+extr_dat$geo2 <- countrycode(extr_dat$geo,  origin = 'country.name', destination = 'iso2c')
+
+extr_dat <- extr_dat %>% 
+  mutate(geo2 = ifelse(is.na(geo2), "AVG", geo2))
+
+extr_dat <- extr_dat %>% 
+  mutate(
+    question_id = recode(question_id,
+                             "Climate \nChange" = "Climate Change",
+                              "Corrupt., \nJudicial \nIndepend." = "Corruption", 
+                              "Crime, \nPublic \nSafety" = "Crime & Public Safety",
+                              "Schools, \nEducation" = "Schools & Education",
+                              "Health \nCare" = "Healthcare",
+                              "Inflation, \nCost of \nLiving" = "Inflation & Cost of Living",
+                              "Jobs" = "Jobs",
+                              "Abortion, \nReprod. \nRights" = "Abortion & Reproductive Rights",
+                              "National \nSecurity" = "National security",
+                              "Migration, \nBorder \nControl" = "Migration & Border Control",
+                              "Housing \nAfford." = "Housing Affordability",
+                              "Energy \nSecurity" = "Energy Security",
+                              "Pensions" = "Pensions",
+                              "Relations \nwith \nthe EU" = "Relations with the EU",
+                         "Taxes" = "Taxes")) 
+    
+ggplot(extr_dat, aes( y = fct_reorder(question_id, -index), x = geo2)) +
+ geom_tile(aes(fill = share),colour = "white", show.legend =c(fill=FALSE), width = .975, height = .975) + 
+  geom_text(aes(label = share), size = 7, colour = "white") +theme_minimal() +
+  bbc_style()+
+  theme(
+    plot.subtitle = element_text(family = "presfont",hjust = 0.5, size = 20),
+   # axis.text.x = element_text(family = "presfont", size = 20),
+  #  axis.text.y = element_text(family = "presfont",,size = 20),
+    legend.text = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_blank(),
+    plot.caption = element_text(family = "presfont", size = 15, hjust = notepos, color = notecol), 
+    plot.margin = margin(t = 2, r = 0.2, b = 0.2, l = 0.2, "cm"),
+  axis.text.y = element_text(family = "presfont", size = 20,
+                                   margin = margin(t = 0, r = 10, b = 0, l = 0)),
+        axis.text.x = element_text(family = "presfont", size = 20,
+                                   margin = margin(t = -1, r = 0, b = 0, l = 0), face = "bold"))+
+  scale_x_discrete(position = "top", expand = expansion(mult = c(0, 0)) ) + 
+  binned_scale("fill",
+                 "foo",
+                 ggplot2:::pal_binned(scales::manual_pal(c("#e7c9c9","#dfb7b7","#c78181","#af4b4b","#9f2727","#782e2e","#390e0e"))),
+                 guide="coloursteps",
+                 breaks=seq(0,70,by=9.9),
+                 limits=c(0,70),
+                 show.limits=TRUE)+  labs(caption= "% thinking things got 'much worse'. Population average, September 2025")+
+  ggflags::geom_flag(data = . %>% filter(country_id != "NA"), aes(country = country_id, x = geo2),  y = 16.7, size = 9) + canvas(14,10)
+
+
+
+
+
+# 
+# 
+# 
+# (plot <- ggplot(extr_dat, aes( x = fct_reorder(question_id, index), y = fct_rev(geo))) +
+#   geom_tile(aes(fill = share),colour = "white", show.legend =c(fill=FALSE), size = 0.8) + 
+#   geom_text(aes(label = share), size = 7, colour = "white") +theme_minimal() +
+#   bbc_style() +
+#   theme(
+#     plot.subtitle = element_text(hjust = 0.5, size = 15),
+#     axis.text.x = element_text(size = 14),
+#     axis.text.y = element_text(size = 17),
+#     legend.text = element_blank(),
+#     panel.grid.major.x = element_blank(),
+#     panel.grid.major.y = element_blank(),
+#     plot.caption = element_text(size = 15, hjust = notepos, color = notecol))+scale_x_discrete(position = "top", expand = c(0,1) ) + 
+#   binned_scale("fill",
+#                  "foo",
+#                  ggplot2:::binned_pal(scales::manual_pal(c("#fff0d5", "#f6d5ae", "#ebbb89", "#dfa264", "#d0893f", "#c07013"))),
+#                  guide="coloursteps",
+#                  breaks=seq(0,50,by=9.9),
+#   #               limits=c(0,0.04),
+#                  show.limits=TRUE)+  labs(caption= "'Q: Now think about the job your government is doing in some different areas. Thinking about the last 12 months, to what extent\ndo you think things in each of the following areas have got better, got worse or stayed about the same in -country-'?.Sum of 'much worse' and 'slightly worse'. Population averages, February 2024.") +
+#   geom_flag(data = . %>% filter(country_id != "NA"), aes(country = country_id), x = 0.2, size = 8))
+# 
+# 
+# plot.save3(plot, width = 4000, height = 2700, text.factor = 0.3)
+# 
+# plot.save4(plot, width = 4000, height = 2700, text.factor = 0.3)
+# 
+# 
+# extr_all2 <- df_all %>% 
+#   filter(answer_code == "Strongly\ndisapprove" | answer_code == "Somewhat\ndisapprove") %>% 
+#   mutate(party_support = "Population") %>% 
+#   left_join(weights)
+#   
+# extr_avg2  <- extr_all2 %>%  
+#   group_by(question_id, answer_code) %>% 
+#  summarise(share = round(weighted.mean(share, cweight))) %>% 
+#   mutate(geo = ".AVERAGE") %>% 
+#   mutate(question_id=fct_reorder(question_id,share)) 
+
+```
+
+
+## GOV PERFORMANCE SUPPORTER
+```{r}
+
+#answer_5 = got much worse
+
+df_all <- dat %>%
+    filter(str_detect(question_id,"scale_isschange")) %>%
+    filter(answer_code != "9999") %>%
+        filter(party_support == "Supporter") %>%
+    group_by(geo, question_id, answer_analysis) %>%
+    summarise(share = sum(weight, na.rm = T)) %>%
+  filter(geo != "Spain") %>% 
+    mutate(share = share/sum(share, na.rm = T),
+           share = round_percent(share, decimals = 0L, ties = "last"),
+           question_id = recode(question_id,
+                                "scale_isschange_climate" = "Climate \nChange",
+                                "scale_isschange_corruption_judicial" = "Corrupt., \nJudicial \nIndepend.",
+                                "scale_isschange_crime" = "Crime, \nPublic \nSafety",
+                                "scale_isschange_schools_education" = "Schools, \nEducation",
+                                "scale_isschange_health" = "Health \nCare",
+                                "scale_isschange_costs_inflation" = "Inflation, \nCost of \nLiving",
+                                "scale_isschange_jobs" = "Jobs",
+                                "scale_isschange_reproductive_rights" = "Abortion, \nReprod. \nRights",
+                                "scale_isschange_security" = "National \nSecurity",
+                                "scale_isschange_migration" = "Migration, \nBorder \nControl",
+                                "scale_isschange_housing_affordability" = "Housing \nAfford.",
+                                "scale_isschange_energy_security" = "Energy \nSecurity",
+                                "scale_isschange_pensions" = "Pensions",
+                                "scale_isschange_eu_relations" = "Relations \nwith \nthe EU",
+                                "scale_isschange_taxes" = "Taxes")) %>%
+    group_by(geo, question_id, answer_analysis) %>%
+    summarise(share = sum(share)) %>% 
+  filter(question_id != "scale_isschange_taxes")
+
+# %>%
+#     spread(answer_analysis, share) %>%
+#     replace(is.na(.), 0) %>%
+#     gather(answer_analysis, share, -question_id) %>%
+#     mutate(answer_analysis = recode(answer_analysis,
+#                                   "got_much_worse"  = "Much\nworse",
+#                                   "got_slightly_worse" = "Slightly\nworse",
+#                                   "stayed_about_same" = "Same",
+#                                   "got_slightly_better" = "Slightly\nbetter",
+#                                   "got_much_better" = "Much\nbetter"),
+#            answer_analysis = factor(answer_analysis,
+#                                     levels = c("Much\nworse", "Slightly\nworse",
+#                                                "Same",
+#                                                "Slightly\nbetter", "Much\nbetter"),
+#                                     ordered = T)) %>%
+#     ungroup()
+
+
+extr_all <- df_all %>% 
+  filter(answer_analysis == "answer_5") %>% 
+  mutate(party_support = "Supporter") %>% 
+  group_by(geo, question_id) %>% 
+  summarise(share = sum(share)) %>% 
+  left_join(weights) 
+  
+  
+extr_avg  <- extr_all %>%  
+  group_by(question_id) %>% 
+ summarise(share = round(weighted.mean(share, cweight))) %>% 
+  mutate(geo = ".AVERAGE") %>% 
+  mutate(question_id=fct_reorder(question_id,share)) 
+
+order <- extr_avg %>% 
+  arrange(-share) %>% 
+  mutate(index = row_number()) 
+
+extr_dat <- extr_all %>% 
+  select(geo, question_id, share)%>% 
+  rbind(extr_avg) 
+
+order <- order %>%  select(-geo, -share)
+
+extr_dat <- extr_dat %>%  left_join(order)
+
+extr_dat$country_id <- tolower(countrycode(extr_dat$geo,  origin = 'country.name', destination = 'iso2c'))
+
+highest <- extr_avg %>% slice(which.max(share))
+
+extr_dat <- extr_dat %>% 
+  mutate(country_id = ifelse( question_id == highest$question_id,country_id, "NA" ) ) 
+
+
+extr_dat$geo2 <- countrycode(extr_dat$geo,  origin = 'country.name', destination = 'iso2c')
+
+extr_dat <- extr_dat %>% 
+  mutate(geo2 = ifelse(is.na(geo2), "AVG", geo2))
+
+extr_dat <- extr_dat %>% 
+  mutate(
+    question_id = recode(question_id,
+                             "Climate \nChange" = "Climate Change",
+                              "Corrupt., \nJudicial \nIndepend." = "Corruption", 
+                              "Crime, \nPublic \nSafety" = "Crime & Public Safety",
+                              "Schools, \nEducation" = "Schools & Education",
+                              "Health \nCare" = "Healthcare",
+                              "Inflation, \nCost of \nLiving" = "Inflation & Cost of Living",
+                              "Jobs" = "Jobs",
+                              "Abortion, \nReprod. \nRights" = "Abortion & Reproductive Rights",
+                              "National \nSecurity" = "National security",
+                              "Migration, \nBorder \nControl" = "Migration & Border Control",
+                              "Housing \nAfford." = "Housing Affordability",
+                              "Energy \nSecurity" = "Energy Security",
+                              "Pensions" = "Pensions",
+                              "Relations \nwith \nthe EU" = "Relations with the EU",
+                         "Taxes" = "Taxes")) 
+    
+ggplot(extr_dat, aes( y = fct_reorder(question_id, -index), x = geo2)) +
+ geom_tile(aes(fill = share),colour = "white", show.legend =c(fill=FALSE), width = .975, height = .975) + 
+  geom_text(aes(label = share), size = 7, colour = "white") +theme_minimal() +
+  bbc_style()+
+  theme(
+    plot.subtitle = element_text(family = "presfont",hjust = 0.5, size = 20),
+   # axis.text.x = element_text(family = "presfont", size = 20),
+  #  axis.text.y = element_text(family = "presfont",,size = 20),
+    legend.text = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_blank(),
+    plot.caption = element_text(family = "presfont", size = 15, hjust = notepos, color = notecol), 
+    plot.margin = margin(t = 2, r = 0.2, b = 0.2, l = 0.2, "cm"),
+  axis.text.y = element_text(family = "presfont", size = 20,
+                                   margin = margin(t = 0, r = 10, b = 0, l = 0)),
+        axis.text.x = element_text(family = "presfont", size = 20,
+                                   margin = margin(t = -1, r = 0, b = 0, l = 0), face = "bold"))+
+  scale_x_discrete(position = "top", expand = expansion(mult = c(0, 0)) ) + 
+  binned_scale("fill",
+                 "foo",
+                 ggplot2:::pal_binned(scales::manual_pal(c("#f7eded","#f7eded","#e7c9c9","#dfb7b7","#c78181","#af4b4b","#9f2727","#782e2e","#390e0e"))),
+                 guide="coloursteps",
+                 breaks=seq(0,90,by=9.9),
+                 limits=c(0,90),
+                 show.limits=TRUE)+  labs(caption= "% thinking things got 'much worse'. Supporter average, September 2025")+
+  ggflags::geom_flag(data = . %>% filter(country_id != "NA"), aes(country = country_id, x = geo2),  y = 16.7, size = 9) + canvas(14,10)
+
+
+
+
+
+```
+
+
+## econ harm
+```{r}
+# 5 = harm a lot
+
+questions <- questions %>% 
+  janitor::clean_names() 
+
+qs <- questions %>% 
+  filter(str_detect(question_id,"^econharm")) %>% 
+  select(question_id, question_text2) %>% 
+  unique()
+
+
+#answer_5 = got much worse
+
+df_all <- dat %>%
+    filter(str_detect(question_id,"^econharm")) %>%
+    filter(answer_code != "9999") %>%
+    group_by(geo, question_id, answer_analysis) %>%
+    summarise(share = sum(weight, na.rm = T)) %>%
+    mutate(share = share/sum(share, na.rm = T),
+           share = round_percent(share, decimals = 0L, ties = "last") ) %>% 
+    group_by(geo, question_id, answer_analysis) %>%
+    summarise(share = sum(share)) %>% 
+  ungroup() %>% 
+  left_join(qs) 
+
+
+extr_all <- df_all %>% 
+  filter(answer_analysis == "harm_alot") %>% 
+  mutate(party_support = "Population")  %>% 
+  left_join(weights) 
+  
+  
+extr_avg  <- extr_all %>%  
+  group_by(question_id) %>% 
+ summarise(share = round(weighted.mean(share, cweight))) %>% 
+  mutate(geo = ".AVERAGE") %>% 
+  mutate(question_id=fct_reorder(question_id,share)) 
+
+order <- extr_avg %>% 
+  arrange(-share) %>% 
+  mutate(index = row_number()) 
+
+extr_dat <- extr_all %>% 
+  select(geo, question_id, share)%>% 
+  rbind(extr_avg) 
+
+order <- order %>%  select(-geo, -share)
+
+extr_dat <- extr_dat %>%  left_join(order)
+
+extr_dat$country_id <- tolower(countrycode(extr_dat$geo,  origin = 'country.name', destination = 'iso2c'))
+
+highest <- extr_avg %>% slice(which.max(share))
+
+extr_dat <- extr_dat %>% 
+  mutate(country_id = ifelse( question_id == highest$question_id,country_id, "NA" ) ) 
+
+
+extr_dat$geo2 <- countrycode(extr_dat$geo,  origin = 'country.name', destination = 'iso2c')
+
+extr_dat <- extr_dat %>% 
+  mutate(geo2 = ifelse(is.na(geo2), "AVG", geo2)) %>% 
+  left_join(qs) 
+
+extr_dat <- extr_dat %>% 
+  mutate(
+    question_text2 = recode(question_text2,
+                             "Rural producers (e.g. farmers, foresters, fishers)" = "Rural producers",
+                            "People who work in city jobs" = "People in city jobs",
+                            )) 
+
+ggplot(extr_dat, aes( y = fct_reorder(question_text2, -index), x = geo2)) +
+ geom_tile(aes(fill = share),colour = "white", show.legend =c(fill=FALSE), width = .975, height = .975) + 
+  geom_text(aes(label = share), size = 7, colour = "white") +theme_minimal() +
+  bbc_style()+
+  theme(
+    plot.subtitle = element_text(family = "presfont",hjust = 0.5, size = 20),
+   # axis.text.x = element_text(family = "presfont", size = 20),
+  #  axis.text.y = element_text(family = "presfont",,size = 20),
+    legend.text = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_blank(),
+    plot.caption = element_text(family = "presfont", size = 15, hjust = notepos, color = notecol), 
+    plot.margin = margin(t = 2, r = 0.2, b = 0.2, l = 0.2, "cm"),
+  axis.text.y = element_text(family = "presfont", size = 20,
+                                   margin = margin(t = 0, r = 10, b = 0, l = 0)),
+        axis.text.x = element_text(family = "presfont", size = 20,
+                                   margin = margin(t = -1, r = 0, b = 0, l = 0), face = "bold"))+
+  scale_x_discrete(position = "top", expand = expansion(mult = c(0, 0)) ) + 
+  binned_scale("fill",
+                 "foo",
+                 ggplot2:::pal_binned(scales::manual_pal(c("#e7c9c9","#c78181","#9f2727","#782e2e","#390e0e"))),
+                 guide="coloursteps",
+                 breaks=seq(0,50,by=9.9),
+                 limits=c(0,50),
+                 show.limits=TRUE)+  labs(caption= "Q:'Do you think the government today favors some groups over others?'. % selecting 'HARMS A LOT'. \nPopulation average, September 2025")+
+  ggflags::geom_flag(data = . %>% filter(country_id != "NA"), aes(country = country_id, x = geo2), y = 16.7, size = 9) + canvas(14,10) 
+
+
+
+
+
+
+
+extr_all <- df_all %>% 
+  filter(answer_analysis == "favor_alot") %>% 
+  mutate(party_support = "Population")  %>% 
+  left_join(weights) 
+  
+  
+extr_avg  <- extr_all %>%  
+  group_by(question_id) %>% 
+ summarise(share = round(weighted.mean(share, cweight))) %>% 
+  mutate(geo = ".AVERAGE") %>% 
+  mutate(question_id=fct_reorder(question_id,share)) 
+
+order <- extr_avg %>% 
+  arrange(-share) %>% 
+  mutate(index = row_number()) 
+
+extr_dat <- extr_all %>% 
+  select(geo, question_id, share)%>% 
+  rbind(extr_avg) 
+
+order <- order %>%  select(-geo, -share)
+
+extr_dat <- extr_dat %>%  left_join(order)
+
+extr_dat$country_id <- tolower(countrycode(extr_dat$geo,  origin = 'country.name', destination = 'iso2c'))
+
+highest <- extr_avg %>% slice(which.max(share))
+
+extr_dat <- extr_dat %>% 
+  mutate(country_id = ifelse( question_id == highest$question_id,country_id, "NA" ) ) 
+
+
+extr_dat$geo2 <- countrycode(extr_dat$geo,  origin = 'country.name', destination = 'iso2c')
+
+extr_dat <- extr_dat %>% 
+  mutate(geo2 = ifelse(is.na(geo2), "AVG", geo2)) %>% 
+  left_join(qs) 
+
+extr_dat <- extr_dat %>% 
+  mutate(
+    question_text2 = recode(question_text2,
+                             "Rural producers (e.g. farmers, foresters, fishers)" = "Rural producers",
+                            "People who work in city jobs" = "People in city jobs",
+                            )) 
+
+ggplot(extr_dat, aes( y = fct_reorder(question_text2, -index), x = geo2)) +
+ geom_tile(aes(fill = share),colour = "white", show.legend =c(fill=FALSE), width = .975, height = .975) + 
+  geom_text(aes(label = share), size = 7, colour = "white") +theme_minimal() +
+  bbc_style()+
+  theme(
+    plot.subtitle = element_text(family = "presfont",hjust = 0.5, size = 20),
+   # axis.text.x = element_text(family = "presfont", size = 20),
+  #  axis.text.y = element_text(family = "presfont",,size = 20),
+    legend.text = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_blank(),
+    plot.caption = element_text(family = "presfont", size = 15, hjust = notepos, color = notecol), 
+    plot.margin = margin(t = 2, r = 0.2, b = 0.2, l = 0.2, "cm"),
+  axis.text.y = element_text(family = "presfont", size = 20,
+                                   margin = margin(t = 0, r = 10, b = 0, l = 0)),
+        axis.text.x = element_text(family = "presfont", size = 20,
+                                   margin = margin(t = -1, r = 0, b = 0, l = 0), face = "bold"))+
+  scale_x_discrete(position = "top", expand = expansion(mult = c(0, 0)) ) + 
+  binned_scale("fill",
+                 "foo",
+                 ggplot2:::pal_binned(scales::manual_pal(c("#c7e9b4","#7fcdbb","#41b6c4","#1d91c0","#225ea8","#253494","#081d58"))),
+                 guide="coloursteps",
+                 breaks=seq(0,60,by=9.9),
+                 limits=c(0,60),
+                 show.limits=TRUE)+  labs(caption= "Q:'Do you think the government today favors some groups over others?'. % selecting 'FAVORS A LOT'. \nPopulation average, September 2025")+
+  ggflags::geom_flag(data = . %>% filter(country_id != "NA"), aes(country = country_id, x = geo2), y = 16.7, size = 9) + canvas(14,10) 
+
+
+
+```
+
+
+
+
+
+
+## econ harm supporters
+```{r}
+# 5 = harm a lot
+
+questions <- questions %>% 
+  janitor::clean_names() 
+
+qs <- questions %>% 
+  filter(str_detect(question_id,"^econharm")) %>% 
+  select(question_id, question_text2) %>% 
+  unique()
+
+
+#answer_5 = got much worse
+
+df_all <- dat %>%
+    filter(str_detect(question_id,"^econharm")) %>%
+    filter(answer_code != "9999") %>%
+          filter(party_support == "Supporter") %>%
+  filter(geo!= "Spain") %>% 
+    group_by(geo, question_id, answer_analysis) %>%
+    summarise(share = sum(weight, na.rm = T)) %>%
+    mutate(share = share/sum(share, na.rm = T),
+           share = round_percent(share, decimals = 0L, ties = "last") ) %>% 
+    group_by(geo, question_id, answer_analysis) %>%
+    summarise(share = sum(share)) %>% 
+  ungroup() %>% 
+  left_join(qs) 
+
+
+extr_all <- df_all %>% 
+  filter(answer_analysis == "harm_alot") %>% 
+  mutate(party_support = "Supporter")  %>% 
+  left_join(weights) 
+  
+  
+extr_avg  <- extr_all %>%  
+  group_by(question_id) %>% 
+ summarise(share = round(weighted.mean(share, cweight))) %>% 
+  mutate(geo = ".AVERAGE") %>% 
+  mutate(question_id=fct_reorder(question_id,share)) 
+
+order <- extr_avg %>% 
+  arrange(-share) %>% 
+  mutate(index = row_number()) 
+
+extr_dat <- extr_all %>% 
+  select(geo, question_id, share)%>% 
+  rbind(extr_avg) 
+
+order <- order %>%  select(-geo, -share)
+
+extr_dat <- extr_dat %>%  left_join(order)
+
+extr_dat$country_id <- tolower(countrycode(extr_dat$geo,  origin = 'country.name', destination = 'iso2c'))
+
+highest <- extr_avg %>% slice(which.max(share))
+
+extr_dat <- extr_dat %>% 
+  mutate(country_id = ifelse( question_id == highest$question_id,country_id, "NA" ) ) 
+
+
+extr_dat$geo2 <- countrycode(extr_dat$geo,  origin = 'country.name', destination = 'iso2c')
+
+extr_dat <- extr_dat %>% 
+  mutate(geo2 = ifelse(is.na(geo2), "AVG", geo2)) %>% 
+  left_join(qs) 
+
+extr_dat <- extr_dat %>% 
+  mutate(
+    question_text2 = recode(question_text2,
+                             "Rural producers (e.g. farmers, foresters, fishers)" = "Rural producers",
+                            "People who work in city jobs" = "People in city jobs",
+                            )) 
+
+ggplot(extr_dat, aes( y = fct_reorder(question_text2, -index), x = geo2)) +
+ geom_tile(aes(fill = share),colour = "white", show.legend =c(fill=FALSE), width = .975, height = .975) + 
+  geom_text(aes(label = share), size = 7, colour = "white") +theme_minimal() +
+  bbc_style()+
+  theme(
+    plot.subtitle = element_text(family = "presfont",hjust = 0.5, size = 20),
+   # axis.text.x = element_text(family = "presfont", size = 20),
+  #  axis.text.y = element_text(family = "presfont",,size = 20),
+    legend.text = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_blank(),
+    plot.caption = element_text(family = "presfont", size = 15, hjust = notepos, color = notecol), 
+    plot.margin = margin(t = 2, r = 0.2, b = 0.2, l = 0.2, "cm"),
+  axis.text.y = element_text(family = "presfont", size = 20,
+                                   margin = margin(t = 0, r = 10, b = 0, l = 0)),
+        axis.text.x = element_text(family = "presfont", size = 20,
+                                   margin = margin(t = -1, r = 0, b = 0, l = 0), face = "bold"))+
+  scale_x_discrete(position = "top", expand = expansion(mult = c(0, 0)) ) + 
+  binned_scale("fill",
+                 "foo",
+                 ggplot2:::pal_binned(scales::manual_pal(c("#e7c9c9","#c78181","#9f2727","#782e2e","#390e0e"))),
+                 guide="coloursteps",
+                 breaks=seq(0,50,by=9.9),
+                 limits=c(0,50),
+                 show.limits=TRUE)+  labs(caption= "Q:'Do you think the government today favors some groups over others?'. % selecting 'HARMS A LOT'. \nSupporter average, September 2025")+
+  ggflags::geom_flag(data = . %>% filter(country_id != "NA"), aes(country = country_id, x = geo2), y = 16.7, size = 9) + canvas(14,10) 
+
+
+
+
+
+
+
+extr_all <- df_all %>% 
+  filter(answer_analysis == "favor_alot") %>% 
+  mutate(party_support = "Population")  %>% 
+  left_join(weights) 
+  
+  
+extr_avg  <- extr_all %>%  
+  group_by(question_id) %>% 
+ summarise(share = round(weighted.mean(share, cweight))) %>% 
+  mutate(geo = ".AVERAGE") %>% 
+  mutate(question_id=fct_reorder(question_id,share)) 
+
+order <- extr_avg %>% 
+  arrange(-share) %>% 
+  mutate(index = row_number()) 
+
+extr_dat <- extr_all %>% 
+  select(geo, question_id, share)%>% 
+  rbind(extr_avg) 
+
+order <- order %>%  select(-geo, -share)
+
+extr_dat <- extr_dat %>%  left_join(order)
+
+extr_dat$country_id <- tolower(countrycode(extr_dat$geo,  origin = 'country.name', destination = 'iso2c'))
+
+highest <- extr_avg %>% slice(which.max(share))
+
+extr_dat <- extr_dat %>% 
+  mutate(country_id = ifelse( question_id == highest$question_id,country_id, "NA" ) ) 
+
+
+extr_dat$geo2 <- countrycode(extr_dat$geo,  origin = 'country.name', destination = 'iso2c')
+
+extr_dat <- extr_dat %>% 
+  mutate(geo2 = ifelse(is.na(geo2), "AVG", geo2)) %>% 
+  left_join(qs) 
+
+extr_dat <- extr_dat %>% 
+  mutate(
+    question_text2 = recode(question_text2,
+                             "Rural producers (e.g. farmers, foresters, fishers)" = "Rural producers",
+                            "People who work in city jobs" = "People in city jobs",
+                            )) 
+
+ggplot(extr_dat, aes( y = fct_reorder(question_text2, -index), x = geo2)) +
+ geom_tile(aes(fill = share),colour = "white", show.legend =c(fill=FALSE), width = .975, height = .975) + 
+  geom_text(aes(label = share), size = 7, colour = "white") +theme_minimal() +
+  bbc_style()+
+  theme(
+    plot.subtitle = element_text(family = "presfont",hjust = 0.5, size = 20),
+   # axis.text.x = element_text(family = "presfont", size = 20),
+  #  axis.text.y = element_text(family = "presfont",,size = 20),
+    legend.text = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_blank(),
+    plot.caption = element_text(family = "presfont", size = 15, hjust = notepos, color = notecol), 
+    plot.margin = margin(t = 2, r = 0.2, b = 0.2, l = 0.2, "cm"),
+  axis.text.y = element_text(family = "presfont", size = 20,
+                                   margin = margin(t = 0, r = 10, b = 0, l = 0)),
+        axis.text.x = element_text(family = "presfont", size = 20,
+                                   margin = margin(t = -1, r = 0, b = 0, l = 0), face = "bold"))+
+  scale_x_discrete(position = "top", expand = expansion(mult = c(0, 0)) ) + 
+  binned_scale("fill",
+                 "foo",
+                 ggplot2:::pal_binned(scales::manual_pal(c("#c7e9b4","#7fcdbb","#41b6c4","#1d91c0","#225ea8","#253494","#081d58"))),
+                 guide="coloursteps",
+                 breaks=seq(0,50,by=9.9),
+                 limits=c(0,50),
+                 show.limits=TRUE,
+               na.value = "0")+  labs(caption= "Q:'Do you think the government today favors some groups over others?'. % selecting 'FAVORS A LOT'. \nSupporter average, September 2025")+
+  ggflags::geom_flag(data = . %>% filter(country_id != "NA"), aes(country = country_id, x = geo2), y = 16.7, size = 9) + canvas(14,10) 
+
+
+
+```
+
+
+
+
+
+
+
+
+
+## polarisation
+```{r}
+questions <- questions %>% 
+  janitor::clean_names() 
+
+qs <- questions %>% 
+  filter(str_detect(question_id,"^div_")) %>% 
+  select(question_id, question_text2) %>% 
+  unique()
+
+
+#answer_5 = got much worse
+
+df_all <- dat %>%
+    filter(str_detect(question_id,"^div_")) %>%
+    filter(question_id != "div_dontknow") %>%
+    group_by(geo, question_id, answer_analysis) %>%
+    summarise(share = sum(weight, na.rm = T)) %>%
+    mutate(share = share/sum(share, na.rm = T),
+           share = round_percent(share, decimals = 0L, ties = "last") ) %>% 
+    group_by(geo, question_id, answer_analysis) %>%
+    summarise(share = sum(share)) %>% 
+  ungroup() %>% 
+  left_join(qs) %>% 
+  filter(answer_analysis == "answer_1")
+
+
+
+df_sup <- dat %>%
+  filter(party_support == "Supporter") %>% 
+    filter(str_detect(question_id,"^div_")) %>%
+    filter(question_id != "div_dontknow") %>%
+  group_by(geo, question_id, answer_analysis) %>%
+    summarise(share = sum(weight, na.rm = T)) %>%
+    mutate(share = share/sum(share, na.rm = T),
+           share = round_percent(share, decimals = 0L, ties = "last") ) %>% 
+    group_by(geo, question_id, answer_analysis) %>%
+    summarise(share = sum(share)) %>% 
+  ungroup() %>% 
+  left_join(qs) %>% 
+  filter(answer_analysis == "answer_1")
+
+
+geo_avg  <- df_sup %>%  
+  left_join(weights) %>% 
+  group_by(question_id) %>% 
+ summarise(share = round(weighted.mean(share, cweight))) %>% 
+  mutate(geo = ".AVERAGE") %>% 
+  mutate(question_id=fct_reorder(question_id,share)) %>% 
+  left_join(qs) 
+
+
+order <- geo_avg %>% 
+  arrange(-share) %>% 
+  mutate(index = row_number()) 
+
+geo_dat <- df_sup %>% 
+  ungroup() %>% 
+  dplyr::select(geo, question_id, share, question_text2)%>% 
+  rbind(geo_avg) 
+
+order <- order %>%  select(-geo, -share)
+
+geo_dat <- geo_dat %>%  left_join(order)
+
+geo_dat$country_id <- tolower(countrycode(geo_dat$geo,  origin = 'country.name', destination = 'iso2c'))
+
+highest <- geo_avg %>% slice(which.max(share))
+
+geo_dat <- geo_dat %>% 
+  mutate(country_id = ifelse(question_id == highest$question_id,country_id, "NA" ) )
+
+#extr_dat <- extr_dat %>% filter(geo != "AVERAGE")
+
+geo_dat$flag <- toupper(geo_dat$country_id)
+
+geo_dat$geo2 <- countrycode(geo_dat$geo,  origin = 'country.name', destination = 'iso2c')
+
+geo_dat <- geo_dat %>% 
+  mutate(geo2 = ifelse(is.na(geo2), "AVG", geo2))
+
+
+ggplot(geo_dat, aes(y = fct_reorder(question_text2, -index), x = geo2)) +
+ geom_tile(aes(fill = share),colour = "white", show.legend =c(fill=FALSE), width = .975, height = .975) + 
+  geom_text(aes(label = share), size = 7, colour = "white") +theme_minimal() +
+  bbc_style()+
+  theme(
+    plot.subtitle = element_text(family = "presfont",hjust = 0.5, size = 20),
+   # axis.text.x = element_text(family = "presfont", size = 20),
+  #  axis.text.y = element_text(family = "presfont",,size = 20),
+    legend.text = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_blank(),
+    plot.caption = element_text(family = "presfont", size = 14, hjust = notepos, color = notecol), 
+    plot.margin = margin(t = 2, r = 0.2, b = 0.2, l = 0.2, "cm"),
+  axis.text.y = element_text(family = "presfont", size = 20,
+                                   margin = margin(t = 0, r = 10, b = 0, l = 0)),
+        axis.text.x = element_text(family = "presfont", size = 20,
+                                   margin = margin(t = -1, r = 0, b = 0, l = 0), face = "bold"))+
+  scale_x_discrete(position = "top", expand = expansion(mult = c(0, 0)) ) + 
+  binned_scale("fill",
+               "foo",
+               ggplot2:::pal_binned(scales::manual_pal(c("#dadaeb","#bcbddc","#9e9ac8","#807dba","#6a51a3","#54278f", "#3f007d"))),
+               guide = "coloursteps",
+               breaks = seq(0, 60, by = 9.9),
+               show.limits = TRUE) +  
+  labs(caption = "Q:'Some people think our society is polarized, other are not so sure. In what ways, if any, \ndo you think society is most divided today?'. % selecting the option. Supporters average, 0925") +
+  ggflags::geom_flag(data = . %>% filter(country_id != "NA"), aes(country = country_id, x = geo2), y = 15.7, size = 9)+ canvas(15,10) 
+
+
+
+
+
+geo_avg  <- df_all %>%  
+  left_join(weights) %>% 
+  group_by(question_id) %>% 
+ summarise(share = round(weighted.mean(share, cweight))) %>% 
+  mutate(geo = ".AVERAGE") %>% 
+  mutate(question_id=fct_reorder(question_id,share)) %>% 
+  left_join(qs) 
+
+
+order <- geo_avg %>% 
+  arrange(-share) %>% 
+  mutate(index = row_number()) 
+
+geo_dat <- df_all %>% 
+  ungroup() %>% 
+  dplyr::select(geo, question_id, share, question_text2)%>% 
+  rbind(geo_avg) 
+
+order <- order %>%  select(-geo, -share)
+
+geo_dat <- geo_dat %>%  left_join(order)
+
+geo_dat$country_id <- tolower(countrycode(geo_dat$geo,  origin = 'country.name', destination = 'iso2c'))
+
+highest <- geo_avg %>% slice(which.max(share))
+
+geo_dat <- geo_dat %>% 
+  mutate(country_id = ifelse(question_id == highest$question_id,country_id, "NA" ) )
+
+#extr_dat <- extr_dat %>% filter(geo != "AVERAGE")
+
+geo_dat$flag <- toupper(geo_dat$country_id)
+
+geo_dat$geo2 <- countrycode(geo_dat$geo,  origin = 'country.name', destination = 'iso2c')
+
+geo_dat <- geo_dat %>% 
+  mutate(geo2 = ifelse(is.na(geo2), "AVG", geo2))
+
+
+ggplot(geo_dat, aes(y = fct_reorder(question_text2, -index), x = geo2)) +
+  geom_tile(aes(fill = share),colour = "white", show.legend =c(fill=FALSE), width = .975, height = .975) + 
+  geom_text(aes(label = share), size = 7, colour = "white") +theme_minimal() +
+  bbc_style()+
+  theme(
+    plot.subtitle = element_text(family = "presfont",hjust = 0.5, size = 20),
+   # axis.text.x = element_text(family = "presfont", size = 20),
+  #  axis.text.y = element_text(family = "presfont",,size = 20),
+    legend.text = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_blank(),
+    plot.caption = element_text(family = "presfont", size = 14, hjust = notepos, color = notecol), 
+    plot.margin = margin(t = 2, r = 0.2, b = 0.2, l = 0.2, "cm"),
+  axis.text.y = element_text(family = "presfont", size = 20,
+                                   margin = margin(t = 0, r = 10, b = 0, l = 0)),
+        axis.text.x = element_text(family = "presfont", size = 20,
+                                   margin = margin(t = -1, r = 0, b = 0, l = 0), face = "bold"))+
+  scale_x_discrete(position = "top", expand = expansion(mult = c(0, 0)) ) + 
+  binned_scale("fill",
+               "foo",
+               ggplot2:::pal_binned(scales::manual_pal(c("#c7e9b4","#7fcdbb","#41b6c4","#1d91c0","#225ea8","#253494","#081d58"))),
+               guide = "coloursteps",
+               breaks = seq(0, 60, by = 9.9),
+               show.limits = TRUE) +  
+  labs(caption = "Q:'Some people think our society is polarized, other are not so sure. In what ways, if any, \ndo you think society is most divided today?'. % selecting the option. Population, 0925") +
+  ggflags::geom_flag(data = . %>% filter(country_id != "NA"), aes(country = country_id, x = geo2), y = 15.7, size = 9)+ canvas(15,10) 
+
+```
+
+## divside rich vs poor
+```{r}
+
+# divside_1
+
+qs <- questions %>% 
+  filter(question_id == "divside_1") %>% 
+  select(question_id, question_text2) %>% 
+  unique()
+
+
+#answer_5 = got much worse
+
+df_all <- dat %>%
+    filter(question_id == "divside_1") %>%
+    filter(question_id != "div_dontknow") %>%
+    group_by(geo, question_id, answer_text) %>%
+    summarise(share = sum(weight, na.rm = T)) %>%
+    mutate(share = share/sum(share, na.rm = T),
+           share = round_percent(share, decimals = 0L, ties = "last") ) %>% 
+  ungroup() 
+
+df_sup <- dat %>%
+  filter(party_support == "Supporter") %>% 
+  filter(question_id == "divside_1") %>%
+    filter(question_id != "div_dontknow") %>%
+    group_by(geo, question_id, answer_text) %>%
+    summarise(share = sum(weight, na.rm = T)) %>%
+    mutate(share = share/sum(share, na.rm = T),
+           share = round_percent(share, decimals = 0L, ties = "last") ) %>% 
+  ungroup() 
+
+
+# Prepare data for diverging bar chart
+plot_data <- df_all %>%
+  pivot_wider(names_from = answer_text, values_from = share) %>%
+  mutate(
+    first = `Closer to the first`,
+    second = `Closer to the second`,
+    equally = `Equally close to both`,
+    neither = `To neither side`
+  ) %>%
+  arrange(desc(second))
+
+# Reshape for plotting
+plot_long <- plot_data %>%
+  mutate(
+    country_order = row_number(),
+    country = geo
+  ) %>%
+  select(country, country_order, first, second, equally, neither)
+
+# Create legend
+
+# Create legend
+legend <- data.frame(
+  xmin = c(0.05, 0.30, 0.67, 0.84),
+  xmax = c(0.2, 0.51, 0.81, 0.94),
+  label = c("Closer to Rich", "Closer to Poor", 
+            "Equally to both", "To neither"),
+  color = c("#5DADE2", "#D14383", "#BDBDBD", "#6B6B6B")
+)
+
+p_legend <- ggplot(legend) +
+  geom_rect(aes(xmin = xmin, xmax = xmax, ymin = 0, ymax = 0.6, fill = color)) +
+  geom_text(aes(x = (xmin + xmax)/2, y = 0.3, label = label), 
+            color = "white", fontface = "bold", size = 4.5) +
+  scale_fill_identity() +
+  theme_void() +
+  coord_cartesian(xlim = c(0, 1), ylim = c(0, 1), expand = FALSE)+theme(
+    plot.margin = margin(0, 0, 0, 0)
+  )
+
+
+plot_long$country_id <- tolower(countrycode(plot_long$country,  origin = 'country.name', destination = 'iso2c'))
+
+#extr_dat <- extr_dat %>% filter(geo != "AVERAGE")
+
+plot_long$geo <- countrycode(plot_long$country,  origin = 'country.name', destination = 'iso2c')
+
+
+# Main plot
+p_main <- ggplot() +
+  geom_col(data = plot_long, 
+           aes(x = reorder(geo, -country_order), y = -first),
+           fill = "#5DADE2", width = 0.75) +
+  geom_col(data = plot_long,
+           aes(x = reorder(geo, -country_order), y = second),
+           fill = "#D14383", width = 0.75) +
+  geom_col(data = plot_long,
+           aes(x = reorder(geo, -country_order), y = equally),
+           fill = "#BDBDBD", width = 0.75, 
+           position = position_nudge(y = max(plot_long$second) + 3)) +
+  geom_col(data = plot_long,
+           aes(x = reorder(geo, -country_order), y = neither),
+           fill = "#6B6B6B", width = 0.75,
+           position = position_nudge(y = max(plot_long$second) + 3 + plot_long$equally)) +
+  geom_text(data = plot_long,
+            aes(x = reorder(geo, -country_order), y = -first/2, label = first),
+            color = "white", fontface = "bold", size = 7) +
+  geom_text(data = plot_long,
+            aes(x = reorder(geo, -country_order), y = second/2, label = second),
+            color = "white", fontface = "bold", size = 7) +
+  geom_text(data = plot_long,
+            aes(x = reorder(geo, -country_order), 
+                y = max(second) + 3 + equally/2, label = equally),
+            color = "black", fontface = "bold", size = 7) +
+  geom_text(data = plot_long,
+            aes(x = reorder(geo, -country_order), 
+                y = max(second) + 3 + equally + neither/2, label = neither),
+            color = "white", fontface = "bold", size = 7) +
+  coord_flip() +
+  labs(x = NULL, y = NULL,
+       caption = "Q:'For each of the division you selected, which side do you personally feel closer to? RICH vs. POOR.'. Population, September 2025") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 15, face = "bold"),
+  #  plot.subtitle = element_text(size = 10, margin = margin(b = 15)),
+    axis.text.y = element_text(size = 18, hjust = 1, face = "bold"),
+    axis.text.x = element_blank(),
+    panel.grid = element_blank(),
+    plot.margin = margin(5, 0, 0, 0),
+  plot.caption = element_text(size = 11, hjust = 0,lineheight = 0.5)
+  )+
+  ggflags::geom_flag(data = plot_long,aes(country = country_id, x = geo), y = -25, size = 6)
+
+# Combine legend and plot
+#gridExtra::grid.arrange(p_legend, p_main, ncol = 1, heights = c(0.13, 1))
+
+grob <- arrangeGrob(p_legend, p_main, ncol = 1, heights = c(0.13, 1))
+
+ggsave("rich_plot.png", grob, width = 10, height = 6)
+
+
+
+
+
+
+# Prepare data for diverging bar chart
+plot_data <- df_sup %>%
+  pivot_wider(names_from = answer_text, values_from = share) %>%
+  mutate(
+    first = `Closer to the first`,
+    second = `Closer to the second`,
+    equally = `Equally close to both`,
+    neither = `To neither side`
+  ) %>%
+  arrange(desc(second))
+
+# Reshape for plotting
+plot_long <- plot_data %>%
+  mutate(
+    country_order = row_number(),
+    country = geo
+  ) %>%
+  select(country, country_order, first, second, equally, neither)
+
+# Create legend
+
+# Create legend
+legend <- data.frame(
+  xmin = c(0.10, 0.40, 0.62, 0.77),
+  xmax = c(0.25, 0.61, 0.75, 0.88),
+  label = c("Closer to Rich", "Closer to Poor", 
+            "Equally to both", "To neither"),
+  color = c("#D14383","#5DADE2", "#BDBDBD", "#6B6B6B")
+)
+
+p_legend <- ggplot(legend) +
+  geom_rect(aes(xmin = xmin, xmax = xmax, ymin = 0, ymax = 0.6, fill = color)) +
+  geom_text(aes(x = (xmin + xmax)/2, y = 0.3, label = label), 
+            color = "white", fontface = "bold", size = 4.5) +
+  scale_fill_identity() +
+  theme_void() +
+  coord_cartesian(xlim = c(0, 1), ylim = c(0, 1), expand = FALSE)+theme(
+    plot.margin = margin(0, 0, 0, 0)
+  )
+
+
+plot_long$country_id <- tolower(countrycode(plot_long$country,  origin = 'country.name', destination = 'iso2c'))
+
+#extr_dat <- extr_dat %>% filter(geo != "AVERAGE")
+
+plot_long$geo <- countrycode(plot_long$country,  origin = 'country.name', destination = 'iso2c')
+
+
+# Main plot
+p_main <- ggplot() +
+  geom_col(data = plot_long, 
+           aes(x = reorder(geo, -country_order), y = -first),
+           fill = "#D14383", width = 0.75) +
+  geom_col(data = plot_long,
+           aes(x = reorder(geo, -country_order), y = second),
+           fill = "#5DADE2", width = 0.75) +
+  geom_col(data = plot_long,
+           aes(x = reorder(geo, -country_order), y = equally),
+           fill = "#BDBDBD", width = 0.75, 
+           position = position_nudge(y = max(plot_long$second) + 3)) +
+  geom_col(data = plot_long,
+           aes(x = reorder(geo, -country_order), y = neither),
+           fill = "#6B6B6B", width = 0.75,
+           position = position_nudge(y = max(plot_long$second) + 3 + plot_long$equally)) +
+  geom_text(data = plot_long,
+            aes(x = reorder(geo, -country_order), y = -first/2, label = first),
+            color = "white", fontface = "bold", size = 5) +
+  geom_text(data = plot_long,
+            aes(x = reorder(geo, -country_order), y = second/2, label = second),
+            color = "white", fontface = "bold", size = 5) +
+  geom_text(data = plot_long,
+            aes(x = reorder(geo, -country_order), 
+                y = max(second) + 3 + equally/2, label = equally),
+            color = "black", fontface = "bold", size = 5) +
+  geom_text(data = plot_long,
+            aes(x = reorder(geo, -country_order), 
+                y = max(second) + 3 + equally + neither/2, label = neither),
+            color = "white", fontface = "bold", size = 5) +
+  coord_flip() +
+  labs(x = NULL, y = NULL,
+       caption = str_wrap("Q:'For each of the division you selected, which side do you personally feel closer to? RICH vs. POOR.'. % selecting the option. \n
+                          Supporters, September '25", width = 160)) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 13, face = "bold"),
+  #  plot.subtitle = element_text(size = 10, margin = margin(b = 15)),
+    axis.text.y = element_text(size = 15, hjust = 1),
+    axis.text.x = element_blank(),
+    panel.grid = element_blank(),
+    plot.margin = margin(5, 0, 0, 0),
+  plot.caption = element_text(size = 9, hjust = 0)
+  )+
+  ggflags::geom_flag(data = plot_long,aes(country = country_id, x = geo), y = -63, size = 6)
+
+# Combine legend and plot
+#gridExtra::grid.arrange(p_legend, p_main, ncol = 1, heights = c(0.13, 1))
+
+grob <- arrangeGrob(p_legend, p_main, ncol = 1, heights = c(0.13, 1))
+
+ggsave("rich_plot_sup.png", grob, width = 10, height = 6)
+
+```
+
+## divside contribute
+```{r}
+
+# divside_1
+
+qs <- questions %>% 
+  filter(question_id == "divside_9") %>% 
+  select(question_id, question_text2) %>% 
+  unique()
+
+
+#answer_5 = got much worse
+
+df_all <- dat %>%
+    filter(question_id == "divside_9") %>%
+    filter(question_id != "div_dontknow") %>%
+    group_by(geo, question_id, answer_text) %>%
+    summarise(share = sum(weight, na.rm = T)) %>%
+    mutate(share = share/sum(share, na.rm = T),
+           share = round_percent(share, decimals = 0L, ties = "last") ) %>% 
+  ungroup() 
+
+df_sup <- dat %>%
+  filter(party_support == "Supporter") %>% 
+  filter(question_id == "divside_9") %>%
+    filter(question_id != "div_dontknow") %>%
+    group_by(geo, question_id, answer_text) %>%
+    summarise(share = sum(weight, na.rm = T)) %>%
+    mutate(share = share/sum(share, na.rm = T),
+           share = round_percent(share, decimals = 0L, ties = "last") ) %>% 
+  ungroup() 
+
+
+# Prepare data for diverging bar chart
+plot_data <- df_all %>%
+  pivot_wider(names_from = answer_text, values_from = share) %>%
+  mutate(
+    first = `Closer to the first`,
+    second = `Closer to the second`,
+    equally = `Equally close to both`,
+    neither = `To neither side`
+  ) %>%
+  arrange(desc(second))
+
+# Reshape for plotting
+plot_long <- plot_data %>%
+  mutate(
+    country_order = row_number(),
+    country = geo
+  ) %>%
+  select(country, country_order, first, second, equally, neither)
+
+# Create legend
+
+# Create legend
+legend <- data.frame(
+  xmin = c(0.05, 0.50, 0.75, 0.90),
+  xmax = c(0.2, 0.70, 0.89, 0.99),
+  label = c("Closer to those \nwho contribute", "Closer to those \nwho take advantage", 
+            "Equally to both", "To neither"),
+  color = c("#5DADE2", "#D14383", "#BDBDBD", "#6B6B6B")
+)
+
+p_legend <- ggplot(legend) +
+  geom_rect(aes(xmin = xmin, xmax = xmax, ymin = 0, ymax = 0.6, fill = color)) +
+  geom_text(aes(x = (xmin + xmax)/2, y = 0.3, label = label), 
+            color = "white", fontface = "bold", size = 4.5) +
+  scale_fill_identity() +
+  theme_void() +
+  coord_cartesian(xlim = c(0, 1), ylim = c(0, 1), expand = FALSE)+theme(
+    plot.margin = margin(0, 0, 0, 0)
+  )
+
+
+plot_long$country_id <- tolower(countrycode(plot_long$country,  origin = 'country.name', destination = 'iso2c'))
+
+#extr_dat <- extr_dat %>% filter(geo != "AVERAGE")
+
+plot_long$geo <- countrycode(plot_long$country,  origin = 'country.name', destination = 'iso2c')
+
+
+# Main plot
+p_main <- ggplot() +
+  geom_col(data = plot_long, 
+           aes(x = reorder(geo, -country_order), y = -first),
+           fill = "#5DADE2", width = 0.75) +
+  geom_col(data = plot_long,
+           aes(x = reorder(geo, -country_order), y = second),
+           fill = "#D14383", width = 0.75) +
+  geom_col(data = plot_long,
+           aes(x = reorder(geo, -country_order), y = equally),
+           fill = "#BDBDBD", width = 0.75, 
+           position = position_nudge(y = max(plot_long$second) + 3)) +
+  geom_col(data = plot_long,
+           aes(x = reorder(geo, -country_order), y = neither),
+           fill = "#6B6B6B", width = 0.75,
+           position = position_nudge(y = max(plot_long$second) + 3 + plot_long$equally)) +
+  geom_text(data = plot_long,
+            aes(x = reorder(geo, -country_order), y = -first/2, label = first),
+            color = "white", fontface = "bold", size = 7) +
+  geom_text(data = plot_long,
+            aes(x = reorder(geo, -country_order), y = second/2, label = second),
+            color = "white", fontface = "bold", size = 7) +
+  geom_text(data = plot_long,
+            aes(x = reorder(geo, -country_order), 
+                y = max(second) + 3 + equally/2, label = equally),
+            color = "black", fontface = "bold", size = 7) +
+  geom_text(data = plot_long,
+            aes(x = reorder(geo, -country_order), 
+                y = max(second) + 3 + equally + neither/2, label = neither),
+            color = "white", fontface = "bold", size = 7) +
+  coord_flip() +
+  labs(x = NULL, y = NULL,
+       caption = "Q:'For each of the division you selected, which side do you personally feel closer to? CONTRIBUTE vs. TAKE ADVANTAGE'. Population") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 15, face = "bold"),
+  #  plot.subtitle = element_text(size = 10, margin = margin(b = 15)),
+    axis.text.y = element_text(size = 18, hjust = 1, face = "bold"),
+    axis.text.x = element_blank(),
+    panel.grid = element_blank(),
+    plot.margin = margin(5, 0, 0, 0),
+  plot.caption = element_text(size = 11, hjust = 0,lineheight = 0.5)
+  )+
+  ggflags::geom_flag(data = plot_long,aes(country = country_id, x = geo), y = -80, size = 6)
+
+# Combine legend and plot
+#gridExtra::grid.arrange(p_legend, p_main, ncol = 1, heights = c(0.13, 1))
+
+grob <- arrangeGrob(p_legend, p_main, ncol = 1, heights = c(0.17, 1))
+
+ggsave("contrib_plot.png", grob, width = 10, height = 6)
+
+
+
+
+
+
+ # Prepare data for diverging bar chart
+plot_data <- df_sup %>%
+  pivot_wider(names_from = answer_text, values_from = share) %>%
+  mutate(
+    first = `Closer to the first`,
+    second = `Closer to the second`,
+    equally = `Equally close to both`,
+    neither = `To neither side`
+  ) %>%
+  arrange(desc(second))
+
+# Reshape for plotting
+plot_long <- plot_data %>%
+  mutate(
+    country_order = row_number(),
+    country = geo
+  ) %>%
+  select(country, country_order, first, second, equally, neither)
+
+# Create legend
+
+# Create legend
+legend <- data.frame(
+  xmin = c(0.05, 0.50, 0.75, 0.90),
+  xmax = c(0.2, 0.70, 0.89, 0.99),
+  label = c("Closer to those \nwho contribute", "Closer to those \nwho take advantage", 
+            "Equally to both", "To neither"),
+  color = c("#5DADE2", "#D14383", "#BDBDBD", "#6B6B6B")
+)
+
+p_legend <- ggplot(legend) +
+  geom_rect(aes(xmin = xmin, xmax = xmax, ymin = 0, ymax = 0.6, fill = color)) +
+  geom_text(aes(x = (xmin + xmax)/2, y = 0.3, label = label), 
+            color = "white", fontface = "bold", size = 4.5) +
+  scale_fill_identity() +
+  theme_void() +
+  coord_cartesian(xlim = c(0, 1), ylim = c(0, 1), expand = FALSE)+theme(
+    plot.margin = margin(0, 0, 0, 0)
+  )
+
+
+plot_long$country_id <- tolower(countrycode(plot_long$country,  origin = 'country.name', destination = 'iso2c'))
+
+#extr_dat <- extr_dat %>% filter(geo != "AVERAGE")
+
+plot_long$geo <- countrycode(plot_long$country,  origin = 'country.name', destination = 'iso2c')
+
+
+# Main plot
+p_main <- ggplot() +
+  geom_col(data = plot_long, 
+           aes(x = reorder(geo, -country_order), y = -first),
+           fill = "#5DADE2", width = 0.75) +
+  geom_col(data = plot_long,
+           aes(x = reorder(geo, -country_order), y = second),
+           fill = "#D14383", width = 0.75) +
+  geom_col(data = plot_long,
+           aes(x = reorder(geo, -country_order), y = equally),
+           fill = "#BDBDBD", width = 0.75, 
+           position = position_nudge(y = max(plot_long$second) + 3)) +
+  geom_col(data = plot_long,
+           aes(x = reorder(geo, -country_order), y = neither),
+           fill = "#6B6B6B", width = 0.75,
+           position = position_nudge(y = max(plot_long$second) + 3 + plot_long$equally)) +
+  geom_text(data = plot_long,
+            aes(x = reorder(geo, -country_order), y = -first/2, label = first),
+            color = "white", fontface = "bold", size = 5) +
+  geom_text(data = plot_long,
+            aes(x = reorder(geo, -country_order), y = second/2, label = second),
+            color = "white", fontface = "bold", size = 5) +
+  geom_text(data = plot_long,
+            aes(x = reorder(geo, -country_order), 
+                y = max(second) + 3 + equally/2, label = equally),
+            color = "black", fontface = "bold", size = 5) +
+  geom_text(data = plot_long,
+            aes(x = reorder(geo, -country_order), 
+                y = max(second) + 3 + equally + neither/2, label = neither),
+            color = "white", fontface = "bold", size = 5) +
+  coord_flip() +
+  labs(x = NULL, y = NULL,
+       caption = str_wrap("Q:'For each of the division you selected, which side do you personally feel closer to? CONTRIBUTE vs. TAKE ADVANTAGE'. % selecting the option. Supporters, 0925", width = 160)) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 13, face = "bold"),
+  #  plot.subtitle = element_text(size = 10, margin = margin(b = 15)),
+    axis.text.y = element_text(size = 15, hjust = 1),
+    axis.text.x = element_blank(),
+    panel.grid = element_blank(),
+    plot.margin = margin(5, 0, 0, 0),
+  plot.caption = element_text(size = 9, hjust = 0)
+  )+
+  ggflags::geom_flag(data = plot_long,aes(country = country_id, x = geo), y = -95, size = 6)
+
+# Combine legend and plot
+#gridExtra::grid.arrange(p_legend, p_main, ncol = 1, heights = c(0.13, 1))
+
+grob <- arrangeGrob(p_legend, p_main, ncol = 1, heights = c(0.13, 1))
+
+ggsave("contrib_plot_sup.png", grob, width = 10, height = 6)
+
+```
+
+
+
+## divside left vs right
+```{r}
+
+# divside_1
+
+qs <- questions %>% 
+  filter(question_id == "divside_3") %>% 
+  select(question_id, question_text2) %>% 
+  unique()
+
+
+#answer_5 = got much worse
+
+df_all <- dat %>%
+    filter(question_id == "divside_3") %>%
+    filter(question_id != "div_dontknow") %>%
+    group_by(geo, question_id, answer_text) %>%
+    summarise(share = sum(weight, na.rm = T)) %>%
+    mutate(share = share/sum(share, na.rm = T),
+           share = round_percent(share, decimals = 0L, ties = "last") ) %>% 
+  ungroup() 
+
+df_sup <- dat %>%
+  filter(party_support == "Supporter") %>% 
+  filter(question_id == "divside_3") %>%
+    filter(question_id != "div_dontknow") %>%
+    group_by(geo, question_id, answer_text) %>%
+    summarise(share = sum(weight, na.rm = T)) %>%
+    mutate(share = share/sum(share, na.rm = T),
+           share = round_percent(share, decimals = 0L, ties = "last") ) %>% 
+  ungroup() 
+
+
+# Prepare data for diverging bar chart
+plot_data <- df_all %>%
+  pivot_wider(names_from = answer_text, values_from = share) %>%
+  mutate(
+    first = `Closer to the first`,
+    second = `Closer to the second`,
+    equally = `Equally close to both`,
+    neither = `To neither side`
+  ) %>%
+  arrange(desc(second))
+
+# Reshape for plotting
+plot_long <- plot_data %>%
+  mutate(
+    country_order = row_number(),
+    country = geo
+  ) %>%
+  select(country, country_order, first, second, equally, neither)
+
+# Create legend
+
+# Create legend
+legend <- data.frame(
+  xmin = c(0.10, 0.40, 0.67, 0.84),
+  xmax = c(0.25, 0.61, 0.81, 0.94),
+  label = c("Closer to Left", "Closer to Right", 
+            "Equally to both", "To neither"),
+  color = c("#D14383", "#5DADE2", "#BDBDBD", "#6B6B6B")
+)
+
+p_legend <- ggplot(legend) +
+  geom_rect(aes(xmin = xmin, xmax = xmax, ymin = 0, ymax = 0.6, fill = color)) +
+  geom_text(aes(x = (xmin + xmax)/2, y = 0.3, label = label), 
+            color = "white", fontface = "bold", size = 4.5) +
+  scale_fill_identity() +
+  theme_void() +
+  coord_cartesian(xlim = c(0, 1), ylim = c(0, 1), expand = FALSE)+theme(
+    plot.margin = margin(0, 0, 0, 0)
+  )
+
+
+plot_long$country_id <- tolower(countrycode(plot_long$country,  origin = 'country.name', destination = 'iso2c'))
+
+#extr_dat <- extr_dat %>% filter(geo != "AVERAGE")
+
+plot_long$geo <- countrycode(plot_long$country,  origin = 'country.name', destination = 'iso2c')
+
+
+# Main plot
+p_main <- ggplot() +
+  geom_col(data = plot_long, 
+           aes(x = reorder(geo, -country_order), y = -first),
+           fill = "#D14383", width = 0.75) +
+  geom_col(data = plot_long,
+           aes(x = reorder(geo, -country_order), y = second),
+           fill = "#5DADE2", width = 0.75) +
+  geom_col(data = plot_long,
+           aes(x = reorder(geo, -country_order), y = equally),
+           fill = "#BDBDBD", width = 0.75, 
+           position = position_nudge(y = max(plot_long$second) + 3)) +
+  geom_col(data = plot_long,
+           aes(x = reorder(geo, -country_order), y = neither),
+           fill = "#6B6B6B", width = 0.75,
+           position = position_nudge(y = max(plot_long$second) + 3 + plot_long$equally)) +
+  geom_text(data = plot_long,
+            aes(x = reorder(geo, -country_order), y = -first/2, label = first),
+            color = "white", fontface = "bold", size = 7) +
+  geom_text(data = plot_long,
+            aes(x = reorder(geo, -country_order), y = second/2, label = second),
+            color = "white", fontface = "bold", size = 7) +
+  geom_text(data = plot_long,
+            aes(x = reorder(geo, -country_order), 
+                y = max(second) + 3 + equally/2, label = equally),
+            color = "black", fontface = "bold", size = 7) +
+  geom_text(data = plot_long,
+            aes(x = reorder(geo, -country_order), 
+                y = max(second) + 3 + equally + neither/2, label = neither),
+            color = "white", fontface = "bold", size = 7) +
+  coord_flip() +
+  labs(x = NULL, y = NULL,
+       caption = "Q:'For each of the division you selected, which side do you personally feel closer to? LEFT vs. RIGHT'. Population average, September 2025") +
+  theme_minimal() +
+ theme(
+    plot.title = element_text(size = 15, face = "bold"),
+  #  plot.subtitle = element_text(size = 10, margin = margin(b = 15)),
+    axis.text.y = element_text(size = 18, hjust = 1, face = "bold"),
+    axis.text.x = element_blank(),
+    panel.grid = element_blank(),
+    plot.margin = margin(5, 0, 0, 0),
+  plot.caption = element_text(size = 11, hjust = 0,lineheight = 0.5)
+  )+
+  ggflags::geom_flag(data = plot_long,aes(country = country_id, x = geo), y = -45, size = 6)
+# Combine legend and plot
+#gridExtra::grid.arrange(p_legend, p_main, ncol = 1, heights = c(0.13, 1))
+
+grob <- arrangeGrob(p_legend, p_main, ncol = 1, heights = c(0.13, 1))
+
+ggsave("lr_plot.png", grob, width = 10, height = 6)
+
+
+
+
+
+# Prepare data for diverging bar chart
+plot_data <- df_sup %>%
+  pivot_wider(names_from = answer_text, values_from = share) %>%
+  mutate(
+    first = `Closer to the first`,
+    second = `Closer to the second`,
+    equally = `Equally close to both`,
+    neither = `To neither side`
+  ) %>%
+  arrange(desc(second))
+
+# Reshape for plotting
+plot_long <- plot_data %>%
+  mutate(
+    country_order = row_number(),
+    country = geo
+  ) %>%
+  select(country, country_order, first, second, equally, neither)
+
+# Create legend
+
+# Create legend
+legend <- data.frame(
+  xmin = c(0.10, 0.40, 0.62, 0.77),
+  xmax = c(0.25, 0.61, 0.75, 0.88),
+  label = c("Closer to Left", "Closer to Right", 
+            "Equally to both", "To neither"),
+  color = c("#D14383","#5DADE2", "#BDBDBD", "#6B6B6B")
+)
+
+p_legend <- ggplot(legend) +
+  geom_rect(aes(xmin = xmin, xmax = xmax, ymin = 0, ymax = 0.6, fill = color)) +
+  geom_text(aes(x = (xmin + xmax)/2, y = 0.3, label = label), 
+            color = "white", fontface = "bold", size = 4.5) +
+  scale_fill_identity() +
+  theme_void() +
+  coord_cartesian(xlim = c(0, 1), ylim = c(0, 1), expand = FALSE)+theme(
+    plot.margin = margin(0, 0, 0, 0)
+  )
+
+
+plot_long$country_id <- tolower(countrycode(plot_long$country,  origin = 'country.name', destination = 'iso2c'))
+
+#extr_dat <- extr_dat %>% filter(geo != "AVERAGE")
+
+plot_long$geo <- countrycode(plot_long$country,  origin = 'country.name', destination = 'iso2c')
+
+
+# Main plot
+p_main <- ggplot() +
+  geom_col(data = plot_long, 
+           aes(x = reorder(geo, -country_order), y = -first),
+           fill = "#D14383", width = 0.75) +
+  geom_col(data = plot_long,
+           aes(x = reorder(geo, -country_order), y = second),
+           fill = "#5DADE2", width = 0.75) +
+  geom_col(data = plot_long,
+           aes(x = reorder(geo, -country_order), y = equally),
+           fill = "#BDBDBD", width = 0.75, 
+           position = position_nudge(y = max(plot_long$second) + 3)) +
+  geom_col(data = plot_long,
+           aes(x = reorder(geo, -country_order), y = neither),
+           fill = "#6B6B6B", width = 0.75,
+           position = position_nudge(y = max(plot_long$second) + 3 + plot_long$equally)) +
+  geom_text(data = plot_long,
+            aes(x = reorder(geo, -country_order), y = -first/2, label = first),
+            color = "white", fontface = "bold", size = 5) +
+  geom_text(data = plot_long,
+            aes(x = reorder(geo, -country_order), y = second/2, label = second),
+            color = "white", fontface = "bold", size = 5) +
+  geom_text(data = plot_long,
+            aes(x = reorder(geo, -country_order), 
+                y = max(second) + 3 + equally/2, label = equally),
+            color = "black", fontface = "bold", size = 5) +
+  geom_text(data = plot_long,
+            aes(x = reorder(geo, -country_order), 
+                y = max(second) + 3 + equally + neither/2, label = neither),
+            color = "white", fontface = "bold", size = 5) +
+  coord_flip() +
+  labs(x = NULL, y = NULL,
+       caption = str_wrap("Q:'For each of the division you selected, which side do you personally feel closer to? LEFT vs. RIGHT'. % selecting the option. \n
+                          Supporters, September '25", width = 160)) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 13, face = "bold"),
+  #  plot.subtitle = element_text(size = 10, margin = margin(b = 15)),
+    axis.text.y = element_text(size = 15, hjust = 1),
+    axis.text.x = element_blank(),
+    panel.grid = element_blank(),
+    plot.margin = margin(5, 0, 0, 0),
+  plot.caption = element_text(size = 9, hjust = 0)
+  )+
+  ggflags::geom_flag(data = plot_long,aes(country = country_id, x = geo), y = -63, size = 6)
+
+# Combine legend and plot
+#gridExtra::grid.arrange(p_legend, p_main, ncol = 1, heights = c(0.13, 1))
+
+grob <- arrangeGrob(p_legend, p_main, ncol = 1, heights = c(0.13, 1))
+
+ggsave("lr_plot_sup.png", grob, width = 10, height = 6)
+
+```
+
+
+
+## ISSPARTY
+```{r}
+#When you think about this political party, which ONE of the issues below do you think this party talks about the most?
+
+
+  df_all <- dat %>%
+#  filter(answer_code != 9994, answer_code != 9999) %>%
+    filter(str_detect(question_id,"^issparty_")) %>%
+  mutate(survey_party_id = str_extract(question_id, "\\d+$")) %>%
+  mutate(answer_text = ifelse(answer_text == "Taxes and the Economy", "Taxes",answer_text )) %>% 
+  group_by(geo, survey_party_id,answer_text) %>%
+    summarise(share = sum(weight, na.rm = T)) %>%
+    mutate(share = share/sum(share, na.rm = T),
+           share = round_percent(share, decimals = 0L, ties = "last") ) %>%
+  ungroup() %>%
+    left_join(parties_eu) %>% left_join(weights) %>% 
+  select(geo, answer_text,share, party_id, eu_short, cweight) %>% 
+   mutate(eu_short = ifelse(party_id == "DE-CDU+CSU", "EPP", eu_short))
+
+
+attrdatsum <- df_all %>%
+  # Filter out non-responses if needed
+#  filter(!answer_text %in% c("None of the above", "Prefer not to answer")) %>%
+  # Calculate country-weighted contribution for each issue
+  mutate(weighted_share = share * cweight) %>%
+  # Aggregate by EU party and issue
+  group_by(eu_short, answer_text) %>%
+  summarise(
+    total_weighted = sum(weighted_share, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  # Calculate percentages within each EU party
+  group_by(eu_short) %>%
+  mutate(
+    share = total_weighted / sum(total_weighted, na.rm = TRUE),
+    share = round(share * 100, 0)  # Convert to percentage
+  ) %>%
+  ungroup() %>%
+  # Sort by EU party and share
+  arrange(eu_short, desc(share)) %>%
+  select(eu_short, answer_text, share, total_weighted) 
+
+
+
+order <- attrdatsum %>%
+  group_by(answer_text) %>% 
+    arrange(share) %>%
+    mutate(index = row_number()) %>%
+    select(eu_short, answer_text, index) %>% 
+  group_by(eu_short) %>% 
+  summarize(index = median(index))
+
+  
+attrs_ordered <- left_join(attrdatsum, order) %>% 
+  arrange(index)%>% 
+ filter(eu_short != "ECPM") %>% 
+ # filter(attr != "sameside" ) %>% 
+  filter(eu_short != "EFA") %>% 
+    filter(eu_short != "ELA")
+
+
+
+# Create ordered factor based on ALDE party values
+alde_order <- attrs_ordered %>%
+  filter(eu_short == "ALDE") %>%
+  arrange(share) %>%
+  pull(answer_text)
+
+# Apply the ALDE ordering to all parties
+attrs_ordered_plot <- attrs_ordered %>%
+  filter(eu_short != "EL") %>%
+    filter(eu_short != "ESN") %>%
+  filter(eu_short != "NTP!") %>%
+    filter(eu_short != "EDP") %>%
+  mutate(answer_text = factor(answer_text, levels = alde_order)) 
+
+# Get all unique answer categories across both datasets
+answers <- unique(attrs_ordered_plot$answer_text)
+
+# Assign consistent colors (first 30 colors from polychrome)
+colors <- as.vector(polychrome(30))[-1:-2]
+
+# Create a named vector for scale_fill_manual
+fill_colors <- setNames(colors[seq_along(answers)], answers)
+
+attrs_ordered_plot %>%
+  ggplot(aes(x = answer_text, y = share, fill = answer_text, label = share)) +
+  facet_wrap(eu_short ~ ., ncol = 6) +
+  geom_bar(stat = "identity", position = "stack") +
+  geom_text(size = 8, hjust = -0.2) +
+  geom_hline(yintercept = 0, size = 1, colour = "#333333") +
+  coord_flip() +
+  labs(subtitle = "ONE issue parties talk about the most") +
+  bbc_style() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 24),
+    legend.position = "none",
+    axis.text.x = element_blank(),
+    axis.text.y = element_text(size = 22),
+    panel.border = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_blank(),
+    axis.ticks = element_blank(),
+    strip.text.x = element_text(size = 22, hjust = 0.35),
+    plot.caption = element_text(family = "presfont", size = 18, hjust = notepos, color = notecol)
+  ) +
+  labs(caption = "Population, September 2025") +
+  canvas(20, 12) +
+  scale_fill_manual(values = fill_colors) + 
+  expand_limits(y = max(attrs_ordered_plot$share) + 7)
+
+
+
+
+
+
+
+
+
+
+attrs_ordered_plot %>%
+  ggplot(aes(x = answer_text, y = share, fill = answer_text, label = share)) +
+  facet_wrap(eu_short~., ncol = 6) +
+  geom_bar(stat = "identity", position = "stack") +
+  geom_text(size = 8,
+            hjust = -0.2) +
+  geom_hline(yintercept = 0, size = 1, colour="#333333") +
+  coord_flip() +
+  labs(subtitle = "ONE issue parties talk about the most") +
+  bbc_style() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 24),
+    legend.position = "none",
+    axis.text.x = element_blank(),
+    axis.text.y = element_text(size = 22),
+    panel.border = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_blank(),
+    axis.ticks = element_blank(),
+    axis.text.x.top = element_text(size = 22),
+    strip.text.x = element_text(size = 22,
+                                hjust = 0.35),
+    plot.caption = element_text(family = "presfont", size = 18, hjust = notepos, color = notecol)
+  ) +
+  labs(caption = "Population, September 2025") + 
+  canvas(20, 12)+  scale_fill_manual(values=as.vector(polychrome(30))[-1:-2] )+ expand_limits(y = max(attrs_ordered_plot$share) + 7)
+
+
+```
+
+
+
+## PARTYTRUST
+```{r}
+#When you think about this political party, on which ONE of the issues below do you trust this party to take the right actions?
+
+  # group_by(geo, question_id, answer_analysis) %>%
+  #   summarise(share = sum(weight, na.rm = T)) %>%
+  #   mutate(share = share/sum(share, na.rm = T),
+  #          share = round_percent(share, decimals = 0L, ties = "last") ) %>% 
+
+
+  df_all <- dat %>%
+#  filter(answer_code != 9994, answer_code != 9999) %>%
+    filter(str_detect(question_id,"^partytrust_")) %>%
+  mutate(survey_party_id = str_extract(question_id, "\\d+$")) %>%
+  mutate(answer_text = ifelse(answer_text == "Taxes and the Economy", "Taxes",answer_text )) %>% 
+  group_by(geo, survey_party_id,answer_text) %>%
+    summarise(share = sum(weight, na.rm = T)) %>%
+    mutate(share = share/sum(share, na.rm = T),
+           share = round_percent(share, decimals = 0L, ties = "last") ) %>%
+  ungroup() %>%
+    left_join(parties_eu) %>% left_join(weights) %>% 
+  select(geo, answer_text,share, party_id, eu_short, cweight) %>% 
+   mutate(eu_short = ifelse(party_id == "DE-CDU+CSU", "EPP", eu_short))
+
+
+attrdatsum <- df_all %>%
+  # Filter out non-responses if needed
+#  filter(!answer_text %in% c("None of the above", "Prefer not to answer")) %>%
+  # Calculate country-weighted contribution for each issue
+  mutate(weighted_share = share * cweight) %>%
+  # Aggregate by EU party and issue
+  group_by(eu_short, answer_text) %>%
+  summarise(
+    total_weighted = sum(weighted_share, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  # Calculate percentages within each EU party
+  group_by(eu_short) %>%
+  mutate(
+    share = total_weighted / sum(total_weighted, na.rm = TRUE),
+    share = round(share * 100, 0)  # Convert to percentage
+  ) %>%
+  ungroup() %>%
+  # Sort by EU party and share
+  arrange(eu_short, desc(share)) %>%
+  select(eu_short, answer_text, share, total_weighted) 
+
+
+
+order <- attrdatsum %>%
+  group_by(answer_text) %>% 
+    arrange(share) %>%
+    mutate(index = row_number()) %>%
+    select(eu_short, answer_text, index) %>% 
+  group_by(eu_short) %>% 
+  summarize(index = median(index))
+
+  
+attrs_ordered <- left_join(attrdatsum, order) %>% 
+  arrange(index)%>% 
+ filter(eu_short != "ECPM") %>% 
+ # filter(attr != "sameside" ) %>% 
+  filter(eu_short != "EFA") %>% 
+    filter(eu_short != "ELA")
+
+
+
+# Create ordered factor based on ALDE party values
+alde_order <- attrs_ordered %>%
+  filter(eu_short == "ALDE") %>%
+  arrange(share) %>%
+  pull(answer_text)
+
+# Apply the ALDE ordering to all parties
+attrs_ordered_plot <- attrs_ordered %>%
+  filter(eu_short != "EL") %>%
+    filter(eu_short != "ESN") %>%
+  filter(eu_short != "NTP!") %>%
+    filter(eu_short != "EDP") %>%
+  mutate(answer_text = factor(answer_text, levels = alde_order)) 
+
+
+
+attrs_ordered_plot %>%
+  ggplot(aes(x = answer_text, y = share, fill = answer_text, label = share)) +
+  facet_wrap(eu_short ~ ., ncol = 6) +
+  geom_bar(stat = "identity", position = "stack") +
+  geom_text(size = 8, hjust = -0.2) +
+  geom_hline(yintercept = 0, size = 1, colour = "#333333") +
+  coord_flip() +
+  labs(subtitle = "ONE issue parties are trusted on") +
+  bbc_style() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 24),
+    legend.position = "none",
+    axis.text.x = element_blank(),
+    axis.text.y = element_text(size = 22),
+    panel.border = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_blank(),
+    axis.ticks = element_blank(),
+    strip.text.x = element_text(size = 22, hjust = 0.35),
+    plot.caption = element_text(family = "presfont", size = 18, hjust = notepos, color = notecol)
+  ) +
+  labs(caption = "Population, September 2025") +
+  canvas(20, 12) +
+  scale_fill_manual(values = fill_colors) + 
+  expand_limits(y = max(attrs_ordered_plot$share) + 7)
+
+
+
+
+
+
+
+
+
+attrs_ordered_plot %>%
+  ggplot(aes(x = answer_text, y = share, fill = answer_text, label = share)) +
+  facet_wrap(eu_short~., ncol = 6) +
+  geom_bar(stat = "identity", position = "stack") +
+  geom_text(size = 8,
+            hjust = -0.2) +
+  geom_hline(yintercept = 0, size = 1, colour="#333333") +
+  coord_flip() +
+  labs(subtitle = "ONE issue parties are trusted on") +
+  bbc_style() +
+  theme(
+   # panel.spacing.x = unit(5, "lines"),
+    plot.title = element_text(hjust = 0.5, size = 24),
+    legend.position = "none",
+    axis.text.x = element_blank(),
+    axis.text.y = element_text(size = 22),
+    panel.border = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_blank(),
+    axis.ticks = element_blank(),
+    axis.text.x.top = element_text(size = 22),
+    strip.text.x = element_text(size = 22,
+                                hjust = 0.35),
+    plot.caption = element_text(family = "presfont", size = 18, hjust = notepos, color = notecol)
+  ) +
+  labs(caption = "Population, September 2025") + 
+  canvas(20, 12)+  scale_fill_manual(values=as.vector(polychrome(30)) )+ expand_limits(y = max(attrs_ordered_plot$share) + 7)
+
+# 
+# attrs_ordered %>% 
+#     filter(eu_short != "EL") %>% 
+#   ggplot(aes(x = reorder(answer_text, share), y = share, fill = answer_text, label = share)) +
+#   facet_wrap(eu_short~., ncol = 3) +
+#   geom_bar(stat = "identity", position = "stack") +
+#   geom_text(size = 6,
+#             position = position_stack(vjust = 0.5)) +
+# #  scale_fill_manual(values = c(pop_colour_prime, party_colour_prime, win_colour_prime),
+# #                    guide = guide_legend(reverse = T)) +
+#   geom_hline(yintercept = 0, size = 1, colour="#333333") +
+#  # scale_y_continuous(limits = c(-5,max(attrs_ordered$share) + 5)) +
+# #  scale_x_discrete(labels = label_wrap(32)) +
+#   coord_flip() +
+#   labs(subtitle = "ONE issue parties are trusted on") +
+#   bbc_style() +
+#   theme(
+#     plot.subtitle = element_text(hjust = 0.5, size =  22),
+#     legend.position = "none",
+#     axis.text.x = element_blank(),
+#     axis.text.y = element_text(size = 18),
+#     panel.border = element_blank(),
+#     panel.grid.major.x = element_blank(),
+#     panel.grid.major.y = element_blank(),
+#     axis.ticks = element_blank(),
+#     axis.text.x.top = element_text(size = 16),
+#     strip.text.x = element_text(size = 18,
+#                                 hjust = 0.35),
+#   #  panel.spacing = unit(-2, "cm"),
+#      plot.caption = element_text(family = "presfont", size = 18, hjust = notepos, color = notecol)) +
+#   labs(caption= "Population, September 2025")+ canvas(8,6)
+# 
+
+```
+
+
+
+## PAIR WAR TIME COMPARE
+```{r}
+
+question = "pair_war"
+
+#left = str_c("\nWe need the peace between Ukraine\nand Russia as soon as possible,\neven if it means that Ukraine\nloses some territory\n"),
+#right = str_c("\nWe need to defend against Russian\naggression in Ukraine. Ukraine\nfights for all of us and if they\nlose, we all lose\n"),
+ 
+ data_all <- dat %>%
+    filter(question_id == question) %>%
+    mutate(direction = ifelse(answer_code < 5, "right",
+                              ifelse(answer_code == "5", "neutral",
+                                     "left")),
+           strength = ifelse(answer_code %in% c("0", "1", "9", "10"), "much",
+                             ifelse(answer_code == "5", "neutral", 
+                                    "somewhat"))) %>%
+    group_by(geo,direction, strength) %>%
+    summarise(share = sum(weight, na.rm = T)) %>%
+    group_by(geo) %>%
+    mutate(share = share/sum(share, na.rm = T),
+           share = round_percent(share, decimals = 0L, ties = "last"),
+           cat = str_c(direction, strength, sep = "_"),
+           group = direction,
+           answer_analysis = str_c(str_to_title(direction), strength, sep = " "),
+           party_support = "Population")
+  
+  
+  data_sup <- dat %>%
+    filter(party_support == "Supporter") %>% 
+    filter(question_id == question) %>%
+    mutate(direction = ifelse(answer_code < 5, "right",
+                              ifelse(answer_code == "5", "neutral",
+                                     "left")),
+           strength = ifelse(answer_code %in% c("0", "1", "9", "10"), "much",
+                             ifelse(answer_code == "5", "neutral", 
+                                    "somewhat"))) %>%
+    group_by(geo, direction, strength) %>%
+    summarise(share = sum(weight, na.rm = T)) %>%
+    group_by(geo) %>%
+    mutate(share = share/sum(share, na.rm = T),
+           share = round_percent(share, decimals = 0L, ties = "last"),
+           cat = str_c(direction, strength, sep = "_"),
+           group = direction,
+           answer_analysis = str_c(str_to_title(direction), strength, sep = " "),
+           party_support = "Supporter")
+ 
+  
+
+  df <- bind_rows(data_all, data_sup) %>%
+    filter(answer_analysis != "Neutral neutral") %>%
+    mutate(party_support = factor(party_support,
+                                  levels = c("Supporter","Population"),
+                                  ordered = T),
+           direction = ifelse(str_detect(answer_analysis, "Left"), "left", "right"),
+           share = ifelse(direction == "left", share *-1, share),
+           answer_code = factor(answer_analysis,
+                                levels = c("Left much", "Left somewhat",
+                                           "Right much", "Right somewhat"),
+                                ordered = T)) %>%
+    group_by(geo,party_support,direction) %>%
+    mutate(share_label_raw = sum(share)) %>%
+    ungroup() %>%
+    mutate(share_label = ifelse(strength == "much", NA, share_label_raw),
+           share_label_pos = ifelse(group == "right", share_label, NA),
+           share_label_neg = ifelse(group == "left", share_label, NA))
+
+  
+
+   df <- bind_rows(data_all, data_sup) %>%
+    filter(answer_analysis != "Neutral neutral")  %>%
+  filter(cat == "left_much" | cat == "left_somewhat")%>%
+   group_by(geo, party_support) %>% 
+  summarize(left = sum(share)) %>% 
+    mutate(party_support = factor(party_support,
+                                 levels = c("Population","Supporter", "Winnable"),
+                                  ordered = T)) %>% 
+  left_join(weights)
+  
+# data_avg <- df %>% 
+#   group_by(party_support) %>% 
+#   summarise(left = weighted.mean(left, cweight)) %>% 
+#   mutate(geo = "AVERAGE")
+
+df <- df %>% 
+  select(party_support, geo, left) 
+# %>% 
+#   rbind(data_avg)
+
+df <- df %>% select(party_support, geo, left)
+
+
+question = "pair_war"
+
+#left = str_c("\nWe need the peace between Ukraine\nand Russia as soon as possible,\neven if it means that Ukraine\nloses some territory\n"),
+#right = str_c("\nWe need to defend against Russian\naggression in Ukraine. Ukraine\nfights for all of us and if they\nlose, we all lose\n"),
+ 
+ data_all <- dat24 %>%
+    filter(question_id == question) %>%
+    mutate(direction = ifelse(answer_code < 5, "right",
+                              ifelse(answer_code == "5", "neutral",
+                                     "left")),
+           strength = ifelse(answer_code %in% c("0", "1", "9", "10"), "much",
+                             ifelse(answer_code == "5", "neutral", 
+                                    "somewhat"))) %>%
+    group_by(country_id,direction, strength) %>%
+    summarise(share = sum(weight, na.rm = T)) %>%
+    group_by(country_id) %>%
+    mutate(share = share/sum(share, na.rm = T),
+           share = round_percent(share, decimals = 0L, ties = "last"),
+           cat = str_c(direction, strength, sep = "_"),
+           group = direction,
+           answer_analysis = str_c(str_to_title(direction), strength, sep = " "),
+           party_support = "Population")
+  
+  
+  data_sup <- dat24 %>%
+    filter(model_value %in% c("Core Support", "Soft Support"),
+         model_party_id %in% alde24$party_id) %>% 
+ #   filter(party_support == "Supporter") %>% 
+    filter(question_id == question) %>%
+    mutate(direction = ifelse(answer_code < 5, "right",
+                              ifelse(answer_code == "5", "neutral",
+                                     "left")),
+           strength = ifelse(answer_code %in% c("0", "1", "9", "10"), "much",
+                             ifelse(answer_code == "5", "neutral", 
+                                    "somewhat"))) %>%
+    group_by(country_id, direction, strength) %>%
+    summarise(share = sum(weight, na.rm = T)) %>%
+    group_by(country_id) %>%
+    mutate(share = share/sum(share, na.rm = T),
+           share = round_percent(share, decimals = 0L, ties = "last"),
+           cat = str_c(direction, strength, sep = "_"),
+           group = direction,
+           answer_analysis = str_c(str_to_title(direction), strength, sep = " "),
+           party_support = "Supporter")
+ 
+  
+  
+
+  df24 <- bind_rows(data_all, data_sup) %>%
+    filter(answer_analysis != "Neutral neutral") %>%
+    mutate(party_support = factor(party_support,
+                                  levels = c("Supporter","Population"),
+                                  ordered = T),
+           direction = ifelse(str_detect(answer_analysis, "Left"), "left", "right"),
+           share = ifelse(direction == "left", share *-1, share),
+           answer_code = factor(answer_analysis,
+                                levels = c("Left much", "Left somewhat",
+                                           "Right much", "Right somewhat"),
+                                ordered = T)) %>%
+    group_by(country_id,party_support,direction) %>%
+    mutate(share_label_raw = sum(share)) %>%
+    ungroup() %>%
+    mutate(share_label = ifelse(strength == "much", NA, share_label_raw),
+           share_label_pos = ifelse(group == "right", share_label, NA),
+           share_label_neg = ifelse(group == "left", share_label, NA))
+
+  
+
+   df24 <- bind_rows(data_all, data_sup) %>%
+    filter(answer_analysis != "Neutral neutral")  %>%
+  filter(cat == "left_much" | cat == "left_somewhat")%>%
+   group_by(country_id, party_support) %>% 
+  summarize(left = sum(share)) %>% 
+    mutate(party_support = factor(party_support,
+                                 levels = c("Population","Supporter", "Winnable"),
+                                  ordered = T)) 
+   
+  #  %>% 
+  # left_join(weights)
+  # 
+# data_avg <- df %>% 
+#   group_by(party_support) %>% 
+#   summarise(left = weighted.mean(left, cweight)) %>% 
+#   mutate(country_id = "AVERAGE")
+
+df24 <- df24 %>% 
+  select(party_support, country_id, left) 
+
+
+
+df24$geo <- countrycode(df24$country_id, origin = 'iso2c', destination = 'country.name')
+
+df24 <- df24 %>% ungroup() %>% select(party_support, geo, left)
+
+
+df$time <- "present"
+df24$time <- "past"
+
+# Combine data
+df_combined <- bind_rows(df, df24)
+
+# Create a unique identifier for country and group
+df_combined <- df_combined %>%
+  mutate(group_id = paste(geo, party_support))
+
+# Count how many timepoints each group_id has
+valid_groups <- df_combined %>%
+  count(group_id) %>%
+  filter(n == 2) %>%
+  pull(group_id)
+
+# Filter only those group_id combinations that exist in both timepoints
+df_filtered <- df_combined %>%
+  filter(group_id %in% valid_groups)
+
+# Ensure correct time ordering
+df_filtered$time <- factor(df_filtered$time, levels = c("past", "present"))
+
+# Plot
+ggplot(df_filtered, aes(x = time, y = left, group = group_id, color = party_support)) +
+  geom_line(arrow = arrow(type = "closed", length = unit(0.15, "inches"))) +
+  geom_point(size = 2) +
+  facet_wrap(~geo, scales = "free_y") +
+  labs(
+    title = "Change in Left Position Over Time by Country and Group",
+    y = "Left Position",
+    x = "Time"
+  ) +
+  theme_minimal()
+ 
+
+
+
+
+
+# Pivot wider
+df_wide <- df_filtered %>%
+  select(geo, party_support, time, left, geo) %>%
+  pivot_wider(names_from = time, values_from = left)
+
+# Clean y-axis labels
+df_wide <- df_wide %>%
+  mutate(
+    geo_clean = geo,
+    y_order = paste(geo, party_support),
+    y_label = ifelse(party_support == "Supporter", geo_clean, ""),
+    country_id = tolower(countrycode(geo,  origin = 'country.name', destination = 'iso2c')),
+    country_id = factor(country_id)
+    # required for ggflags
+  )
+
+# Order y-axis with supporter above population
+df_wide$y_order <- factor(df_wide$y_order,
+                          levels = df_wide %>%
+                            arrange(geo, desc(party_support)) %>%
+                            pull(y_order))
+
+# Label only for Supporters
+df_wide <- df_wide %>%
+  mutate(y_label = ifelse(party_support == "Population", geo_clean, ""))
+
+# Create numeric y position for plotting with flags
+df_wide <- df_wide %>%
+  mutate(y_numeric = as.numeric(y_order))
+
+# y_lines <- df_wide %>%
+#   group_by(geo) %>%
+#   summarise(separator_y = max(y_numeric) + 0.5) %>%
+#   ungroup()
+
+pop_order <- df_wide %>%
+  filter(party_support == "Population") %>%
+  arrange(desc(-present)) %>%
+  pull(geo)
+
+# Apply new ordering and compute y positions
+df_wide <- df_wide %>%
+  mutate(
+    geo_factor = factor(geo, levels = pop_order),  # order by descending population
+    y_base = as.numeric(geo_factor),
+    y_offset = ifelse(party_support == "Population", -0.15, 0.15),
+    y_numeric = y_base + y_offset,
+    y_label = ifelse(party_support == "Supporter", geo, "")  # label once
+  )
+
+# Update lines separating countries
+y_lines <- df_wide %>%
+  distinct(geo, y_base) %>%
+  mutate(separator_y = y_base + 0.5)
+
+
+df_wide$country_id <- as.character(df_wide$country_id)
+
+df_wide <- df_wide %>% 
+  filter(geo != "Bulgaria")
+
+# Plot
+ggplot(df_wide) +
+  geom_hline(data = y_lines,
+             aes(yintercept = separator_y),
+             color = "grey80", linewidth = 0.4) +
+  # Arrow lines
+  geom_segment(aes(
+    x = past, xend = present,
+    y = y_numeric, yend = y_numeric,
+    color = party_support
+  ),
+  arrow = arrow(length = unit(0.2, "inches"), type = "closed"),
+  size = 2
+  )  +
+  # Replace numeric y-ticks with proper country labels
+  scale_y_continuous(
+    breaks = df_wide$y_numeric,
+    labels = df_wide$y_label
+  ) +
+scale_x_continuous(breaks = c(20, 30, 40, 50, 60, 70, 80)) +
+  labs(
+    title = " ",
+    x = "",
+    y = NULL,
+    color = "party_support"
+  ) +
+  scale_color_manual(values = c(
+    "Population" = "#008fcc",
+    "Supporter" = "#f1417c"
+  ), name = NULL) +
+  theme_void() +
+  theme(
+    panel.grid.major.y = element_blank(),
+    axis.text.y = element_text(size = 25, hjust = 1),
+    axis.text.x = element_text(size = 25),  # optional for clarity
+    legend.position = "top",
+         plot.caption = element_text(size = 20, hjust = notepos, color = notecol, lineheight = 0.3),
+    plot.title = element_text(size=22),
+    legend.text=element_text(size=20)
+  )+
+  # Add flags to top row only
+ggflags::geom_flag(
+  data = df_wide %>% filter(party_support == "Supporter"),
+  aes(
+    x = -5,
+    y = y_numeric,
+    country = country_id
+  ),
+  size = 8,
+  inherit.aes = FALSE
+)+  labs(caption= "\n Change in share of respondents being closer to 'defend against Russian aggression'.  Feb'24 to Sep'25") + canvas(15,10)
+  
+  # + annotate("text",
+  #            x = 80, y = 8.8,  # y for "Latvia Supporter"
+  #            label = "Supporters", color = "#f1417c", size = 9, hjust = 0) +
+  #   annotate("text",
+  #            x = 55, y = 9.2,  # y for "Latvia Population"
+  #            label = "Population", color = "#008fcc", size = 9, hjust = 0) +
+  #   theme(legend.position = "none")  # Remove the top legend
+  # )
+
+#ggflags::geom_flag(data = . %>% filter(country_id != "NA"), aes(country = country_id), x = 0.2, size = 8))
+
+
+plot.save(plot, width = 3000, height = 2500, text.factor = 0.6)
+
+# 
+#  ggflags::geom_flag(data = . %>% filter(country_id != "NA"), aes(country = country_id), position = position_nudge(x = -4), size = 8) 
+
+```
+
+
+
+## EXPECTATIONS - ECONOMY
+
+```{r}
+
+# ECONOMY
+
+# 2 = worse
+
+data_all <- dat %>%
+  filter(question_id == "expect_1") %>%
+  mutate(party_support = "Population") %>%
+  group_by(geo, party_support, answer_text) %>%
+  summarise(share = sum(weight, na.rm = T)) %>%
+  mutate(share = share/sum(share, na.rm = T))
+
+
+data_sup <- dat %>%
+  filter(party_support == "Supporter") %>%
+  filter(question_id == "expect_1") %>%
+  mutate(party_support = "Supporter") %>%
+  group_by(geo, party_support, answer_text) %>%
+  summarise(share = sum(weight, na.rm = T)) %>%
+  mutate(share = share/sum(share, na.rm = T))
+
+df <- data_all %>% 
+  rbind(data_sup) %>% 
+  filter(answer_text == "Better")
+
+# data <- data %>% 
+# mutate(party_support=fct_relevel(party_support,c("Population", "Supporter", "Winnable")))
+
+
+order <- df %>% 
+  ungroup() %>% 
+  filter(party_support == "Population") %>% 
+arrange(-share) %>% 
+mutate(index= row_number()) 
+
+# order <- order %>% 
+#   mutate(index = ifelse(party_support == "Population", index, ifelse()))
+
+df <- left_join(df, order)
+
+df <- df %>%
+  group_by(geo) %>%
+  mutate(index = unique(index[!is.na(index)]))
+
+#data$country_id <- tolower(countrycode(data$geo,  origin = 'country.name', destination = 'iso2c'))
+
+highest <- df %>%  
+  group_by(geo) %>% 
+  slice(which.min(share))
+
+highest$country_id <- tolower(countrycode(highest$geo,  origin = 'country.name', destination = 'iso2c'))
+  
+df <- df %>% 
+  left_join(highest)
+
+df %>% 
+#  group_by(country) %>%
+  ggplot(aes(x= share*100, y= reorder(geo,-index))) +
+  geom_line(aes(group = geo),color="grey", size =4)+
+    geom_point(aes(color=party_support, fill = party_support), alpha = 0.8,  size=8, position=position_jitter(h=0,w=0), key_glyph='rect')  +
+      bbc_style() +
+    theme(
+      legend.position = "top",
+          legend.text = element_text(size = 18),
+          legend.title = element_blank(),
+          panel.border = element_blank(),
+          axis.title.y = element_blank(),
+          axis.text.y =element_text(hjust = 1, margin(t = 0,r = 0, b = 0, l = 0),size = 20),
+          axis.text.x = element_text(size = 20),
+          axis.title.x = element_blank(),
+          panel.grid.major.y = element_blank(),
+          panel.grid.minor.y = element_blank(),
+          panel.grid.minor.x = element_blank(),
+          panel.grid.major.x = element_blank(),
+          axis.text.x.top = element_text(size = 20),
+          strip.text.x = element_text(size = 20),
+          panel.spacing = unit(2, "lines"),
+          plot.subtitle = element_text(hjust = 0.5, size = 22),
+                  legend.spacing.x = unit(c(0.2),"cm"),
+        legend.key.size = unit(0.1, "cm"),
+        plot.caption = element_text(family = "presfont",size = 18, hjust = notepos, color = notecol))   +     
+   scale_fill_manual(values = c(alde_b1, alde_p1,win_colour_prime),
+                       guide = guide_legend(reverse = TRUE, nrow = 1,
+                                         label.position = "bottom"))+
+      scale_colour_manual(values = c(alde_b1, alde_p1,win_colour_prime),
+                       guide = guide_legend(reverse = TRUE, nrow = 1,
+                                         label.position = "bottom")) + labs(subtitle = "") + xlim(0,100) +  labs(caption= "% expecting the economic situation of the country will get BETTER in next 12 months, September 2025") +
+  ggflags::geom_flag( data = df %>%  group_by(geo) %>% slice(which.min(share)), aes(country = country_id), position = position_nudge(x = -4), size = 9) + canvas(14,10)
+
+
+
+
+
+```
+
+
+## EXPECTATIONS - PERSONAL
+```{r}
+
+# ECONOMY
+
+data_all <- dat %>%
+  filter(question_id == "expect_2") %>%
+  mutate(party_support = "Population") %>%
+  group_by(geo, party_support, answer_analysis) %>%
+  summarise(share = sum(weight, na.rm = T)) %>%
+  mutate(share = share/sum(share, na.rm = T))
+
+
+data_sup <- dat %>%
+  filter(party_support == "Supporter") %>%
+  filter(question_id == "expect_2") %>%
+  mutate(party_support = "Supporter") %>%
+  group_by(geo, party_support, answer_analysis) %>%
+  summarise(share = sum(weight, na.rm = T)) %>%
+  mutate(share = share/sum(share, na.rm = T))
+
+df <- data_all %>% 
+  rbind(data_sup) %>% 
+  filter(answer_analysis == "better")
+
+# data <- data %>% 
+# mutate(party_support=fct_relevel(party_support,c("Population", "Supporter", "Winnable")))
+
+
+order <- df %>% 
+  ungroup() %>% 
+  filter(party_support == "Population") %>% 
+arrange(-share) %>% 
+mutate(index= row_number()) 
+
+# order <- order %>% 
+#   mutate(index = ifelse(party_support == "Population", index, ifelse()))
+
+df <- left_join(df, order)
+
+df <- df %>%
+  group_by(geo) %>%
+  mutate(index = unique(index[!is.na(index)]))
+
+#data$country_id <- tolower(countrycode(data$geo,  origin = 'country.name', destination = 'iso2c'))
+
+highest <- df %>%  
+  group_by(geo) %>% 
+  slice(which.min(share))
+
+highest$country_id <- tolower(countrycode(highest$geo,  origin = 'country.name', destination = 'iso2c'))
+  
+df <- df %>% 
+  left_join(highest)
+
+(plot <- df %>% 
+#  group_by(country) %>%
+  ggplot(aes(x= share*100, y= reorder(geo,-index))) +
+  geom_line(aes(group = geo),color="grey", size =3)+
+    geom_point(aes(color=party_support, fill = party_support), alpha = 0.8,  size=7, position=position_jitter(h=0,w=0), key_glyph='rect')  +
+      bbc_style() +
+    theme(legend.position = "top",
+          legend.text = element_text(size = 18),
+          legend.title = element_blank(),
+          panel.border = element_blank(),
+          axis.title.y = element_blank(),
+         axis.text.y =element_text(hjust = 1, margin(t = 0,r = 0, b = 0, l = 0)),
+          axis.text.x = element_text(size = 20),
+          axis.title.x = element_blank(),
+          panel.grid.major.y = element_blank(),
+          panel.grid.minor.y = element_blank(),
+          panel.grid.minor.x = element_blank(),
+          panel.grid.major.x = element_blank(),
+          axis.text.x.top = element_text(size = 18),
+          strip.text.x = element_text(size = 18),
+          panel.spacing = unit(2, "lines"),
+          plot.subtitle = element_text(hjust = 0.5, size = subtitle_text),
+      plot.caption = element_text(family = "presfont",size = 16, hjust = notepos, color = notecol))   +     
+   scale_fill_manual(values = c(alde_b1, alde_p1,win_colour_prime),
+                       guide = guide_legend(reverse = TRUE, nrow = 1,
+                                         label.position = "bottom"))+
+      scale_colour_manual(values = c(alde_b1, alde_p1,win_colour_prime),
+                       guide = guide_legend(reverse = TRUE, nrow = 1,
+                                         label.position = "bottom")) + labs(subtitle = "") + xlim(0,100) +  labs(caption= "% expecting their personal economic situation will get BETTER in the next 12 months, \nMay 2025") +
+  ggflags::geom_flag( data = df %>%  group_by(geo) %>% slice(which.min(share)), aes(country = country_id), position = position_nudge(x = -4), size = 8.5)  ) 
+
+plot.save(plot, width = 2800, height = 1400, text.factor = 0.4)
+
+
+```
+
